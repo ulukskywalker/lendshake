@@ -1,0 +1,11 @@
+//
+//  Dvelopment.xcconfig
+//  lendshake
+//
+//  Created by Uluk Abylbekov on 2/1/26.
+//
+
+// Configuration settings file format documentation can be found at:
+// https://developer.apple.com/documentation/xcode/adding-a-build-configuration-file-to-your-project
+SUPABASE_URL = https:/$()/thrdeovlreaguclsdnqf.supabase.co
+SUPABASE_KEY = sb_publishable_cdAoKIFdqLOXDFlURz48xA_UU7raCTO

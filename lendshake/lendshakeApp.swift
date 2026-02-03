@@ -9,9 +9,14 @@ import SwiftUI
 
 @main
 struct lendshakeApp: App {
+    @State private var authManager = AuthManager()
+    @State private var loanManager = LoanManager()
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
+                .environment(authManager)
+                .environment(loanManager)
         }
     }
 }

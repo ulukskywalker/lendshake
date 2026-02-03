@@ -6,13 +6,35 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		530EEC9D2F301AE90023473F /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 530EEC9C2F301AE90023473F /* Auth */; };
+		530EEC9F2F301AE90023473F /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = 530EEC9E2F301AE90023473F /* Functions */; };
+		530EECA12F301AE90023473F /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = 530EECA02F301AE90023473F /* PostgREST */; };
+		530EECA32F301AE90023473F /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = 530EECA22F301AE90023473F /* Realtime */; };
+		530EECA52F301AE90023473F /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = 530EECA42F301AE90023473F /* Storage */; };
+		530EECA72F301AE90023473F /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 530EECA62F301AE90023473F /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		530EEC802F3012420023473F /* lendshake.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = lendshake.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		530EECB52F301F4D0023473F /* Exceptions for "lendshake" folder in "lendshake" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 530EEC7F2F3012420023473F /* lendshake */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		530EEC822F3012420023473F /* lendshake */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				530EECB52F301F4D0023473F /* Exceptions for "lendshake" folder in "lendshake" target */,
+			);
 			path = lendshake;
 			sourceTree = "<group>";
 		};
@@ -23,6 +45,12 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				530EECA12F301AE90023473F /* PostgREST in Frameworks */,
+				530EEC9F2F301AE90023473F /* Functions in Frameworks */,
+				530EECA72F301AE90023473F /* Supabase in Frameworks */,
+				530EEC9D2F301AE90023473F /* Auth in Frameworks */,
+				530EECA52F301AE90023473F /* Storage in Frameworks */,
+				530EECA32F301AE90023473F /* Realtime in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -33,6 +61,7 @@
 			isa = PBXGroup;
 			children = (
 				530EEC822F3012420023473F /* lendshake */,
+				530EEC9B2F301AE90023473F /* Frameworks */,
 				530EEC812F3012420023473F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -43,6 +72,13 @@
 				530EEC802F3012420023473F /* lendshake.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		530EEC9B2F301AE90023473F /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -65,6 +101,12 @@
 			);
 			name = lendshake;
 			packageProductDependencies = (
+				530EEC9C2F301AE90023473F /* Auth */,
+				530EEC9E2F301AE90023473F /* Functions */,
+				530EECA02F301AE90023473F /* PostgREST */,
+				530EECA22F301AE90023473F /* Realtime */,
+				530EECA42F301AE90023473F /* Storage */,
+				530EECA62F301AE90023473F /* Supabase */,
 			);
 			productName = lendshake;
 			productReference = 530EEC802F3012420023473F /* lendshake.app */;
@@ -94,6 +136,9 @@
 			);
 			mainGroup = 530EEC772F3012420023473F;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				530EEC902F3016320023473F /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 530EEC812F3012420023473F /* Products */;
 			projectDirPath = "";
@@ -127,6 +172,8 @@
 /* Begin XCBuildConfiguration section */
 		530EEC892F3012430023473F /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 530EEC822F3012420023473F /* lendshake */;
+			baseConfigurationReferenceRelativePath = Development.xcconfig;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -189,6 +236,8 @@
 		};
 		530EEC8A2F3012430023473F /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 530EEC822F3012420023473F /* lendshake */;
+			baseConfigurationReferenceRelativePath = Production.xcconfig;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -243,6 +292,8 @@
 		};
 		530EEC8C2F3012430023473F /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 530EEC822F3012420023473F /* lendshake */;
+			baseConfigurationReferenceRelativePath = Development.xcconfig;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -254,6 +305,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = lendshake/Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -287,6 +339,8 @@
 		};
 		530EEC8D2F3012430023473F /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReferenceAnchor = 530EEC822F3012420023473F /* lendshake */;
+			baseConfigurationReferenceRelativePath = Production.xcconfig;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -298,6 +352,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = lendshake/Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -351,6 +406,50 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		530EEC902F3016320023473F /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase-community/supabase-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		530EEC9C2F301AE90023473F /* Auth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 530EEC902F3016320023473F /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Auth;
+		};
+		530EEC9E2F301AE90023473F /* Functions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 530EEC902F3016320023473F /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Functions;
+		};
+		530EECA02F301AE90023473F /* PostgREST */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 530EEC902F3016320023473F /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = PostgREST;
+		};
+		530EECA22F301AE90023473F /* Realtime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 530EEC902F3016320023473F /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Realtime;
+		};
+		530EECA42F301AE90023473F /* Storage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 530EEC902F3016320023473F /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Storage;
+		};
+		530EECA62F301AE90023473F /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 530EEC902F3016320023473F /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 530EEC782F3012420023473F /* Project object */;
 }
