@@ -12,7 +12,8 @@ struct ProfileSetupView: View {
     
     @State private var firstName: String = ""
     @State private var lastName: String = ""
-    @State private var selectedState: String = "CA"
+    @State private var phoneNumber: String = ""
+    @State private var selectedState: String = "IL"
     @State private var isLoading: Bool = false
     @State private var errorMessage: String?
     
@@ -31,13 +32,17 @@ struct ProfileSetupView: View {
                     
                     TextField("Legal Last Name", text: $lastName)
                         .textInputAutocapitalization(.words)
+                }
+                
+                Section(header: Text("Contact Info")) {
+                    TextField("Mobile Phone", text: $phoneNumber)
+                        .keyboardType(.phonePad)
                     
                     Picker("State of Residence", selection: $selectedState) {
                         ForEach(usStates, id: \.self) { state in
                             Text(state).tag(state)
                         }
                     }
-
                 }
                 
                 if let errorMessage = errorMessage {
@@ -66,7 +71,7 @@ struct ProfileSetupView: View {
                                 .foregroundColor(.white)
                         }
                     }
-                    .disabled(firstName.isEmpty || lastName.isEmpty || isLoading)
+                    .disabled(firstName.isEmpty || lastName.isEmpty || phoneNumber.isEmpty || isLoading)
                     .listRowBackground(Color.blue)
                 }
             }
@@ -84,6 +89,7 @@ struct ProfileSetupView: View {
                 firstName: firstName,
                 lastName: lastName,
                 state: selectedState,
+                phoneNumber: phoneNumber
             )
         } catch {
             errorMessage = "Failed to save profile: \(error.localizedDescription)"

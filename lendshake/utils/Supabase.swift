@@ -38,5 +38,5 @@ enum APIConfig {
 // Initialization
 let supabase = SupabaseClient(
     supabaseURL: APIConfig.supabaseURL,
-    supabaseKey: APIConfig.supabaseKey
+    supabaseKey: APIConfig.supabaseKey,
 )

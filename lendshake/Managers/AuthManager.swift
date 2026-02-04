@@ -16,11 +16,17 @@ class AuthManager {
     var isLoading: Bool = true
     var awaitingEmailConfirmation: Bool = false
     var isProfileComplete: Bool = false
+    var currentUserProfile: UserProfile?
     
     // Simple User Profile struct for decoding
     struct UserProfile: Decodable {
         let first_name: String?
         let last_name: String?
+        let phone_number: String? // Added phone number
+        
+        var fullName: String {
+            [first_name, last_name].compactMap { $0 }.joined(separator: " ")
+        }
     }
     
     init() {
@@ -49,8 +55,6 @@ class AuthManager {
         guard let user = supabase.auth.currentUser else { return }
         
         // Fetch profile row
-        // Assuming table 'profiles' with 'id' matching user.id
-        // We select 'first_name' and 'last_name' to check if they are set
         do {
             let profile: UserProfile = try await supabase
                 .from("profiles")
@@ -60,6 +64,8 @@ class AuthManager {
                 .execute()
                 .value
             
+            self.currentUserProfile = profile
+            
             if let first = profile.first_name, !first.isEmpty,
                let last = profile.last_name, !last.isEmpty {
                 self.isProfileComplete = true
@@ -68,13 +74,28 @@ class AuthManager {
             }
         } catch {
             // Profile row typically auto-created by triggers, or might not exist.
-            // If error, assume incomplete.
             print("Profile check error: \(error)")
             self.isProfileComplete = false
+            self.currentUserProfile = nil
         }
     }
     
-    func createProfile(firstName: String, lastName: String, state: String) async throws {
+    func fetchProfileName(for userId: UUID) async -> String? {
+        do {
+            let profile: UserProfile = try await supabase
+                .from("profiles")
+                .select("first_name, last_name")
+                .eq("id", value: userId)
+                .single()
+                .execute()
+                .value
+            return profile.fullName.isEmpty ? nil : profile.fullName
+        } catch {
+            return nil
+        }
+    }
+    
+    func createProfile(firstName: String, lastName: String, state: String, phoneNumber: String) async throws {
         guard let user = supabase.auth.currentUser else { return }
         
         struct ProfileUpdate: Encodable {
@@ -82,6 +103,7 @@ class AuthManager {
             let first_name: String
             let last_name: String
             let residence_state: String
+            let phone_number: String
             let updated_at: Date
         }
         
@@ -90,6 +112,7 @@ class AuthManager {
             first_name: firstName,
             last_name: lastName,
             residence_state: state,
+            phone_number: phoneNumber,
             updated_at: Date()
         )
         
@@ -97,25 +120,26 @@ class AuthManager {
         try await supabase.from("profiles").upsert(update).execute()
         
         self.isProfileComplete = true
+        // Refresh local profile
+        try await checkProfile()
     }
     
     func signOut() async throws {
         try await supabase.auth.signOut()
         self.isAuthenticated = false
+        self.isProfileComplete = false
+        self.currentUserProfile = nil
     }
     
     func signIn(email: String, password: String) async throws {
         _ = try await supabase.auth.signIn(email: email, password: password)
         self.isAuthenticated = true
+        await checkSession()
     }
     
     func signUp(email: String, password: String) async throws {
         do {
             _ = try await supabase.auth.signUp(email: email, password: password)
-            // Implicitly assume success means email sent.
-            // Supabase returns a session if "Confirm Email" is disabled, but nil/user if enabled.
-            // We'll set waiting state regardless? No, let's check.
-            // Actually, for this flow, we FORCE the user to see the verification screen.
             self.awaitingEmailConfirmation = true
         } catch {
             print("DEBUG: Sign Up Error: \(error)")

@@ -10,6 +10,7 @@ import SwiftUI
 struct LoanDetailView: View {
     let loan: Loan
     @Environment(LoanManager.self) var loanManager
+    @Environment(AuthManager.self) var authManager
     @Environment(\.dismiss) var dismiss
     
     @State private var errorMsg: String?
@@ -18,40 +19,101 @@ struct LoanDetailView: View {
     // Alert States
     @State private var showForgiveAlert: Bool = false
     @State private var showPaidOffAlert: Bool = false
+    @State private var showDeleteDraftAlert: Bool = false
+    @State private var showCancelAlert: Bool = false
     
     @State private var showAgreementSheet: Bool = false
+    @State private var showProofSheet: Bool = false
+    @State private var showTermsSheet: Bool = false
+    @State private var lenderName: String = "Loading..."
+    
+    // Ledger States
+    @State private var payments: [Payment] = []
+    @State private var showPaymentSheet: Bool = false
+    @State private var pendingPaymentToVerify: Payment?
+    @State private var showVerifyPaymentAlert: Bool = false
     
     // Find the latest version of this loan from the manager to ensure UI updates
     var liveLoan: Loan {
         loanManager.loans.first(where: { $0.id == loan.id }) ?? loan
     }
     
+    var isLender: Bool {
+        loanManager.isLender(of: liveLoan)
+    }
+    
     var body: some View {
         ScrollView {
-            // Show Active View for Active, Paid Off, and Forgiven loans
-            if [.active, .completed, .forgiven].contains(liveLoan.status) {
-                activeLoanView
-            } else {
-                draftLoanView
+            VStack(spacing: 24) {
+                // 1. Header Card
+                headerCard
+                
+                // 2. Action Buttons
+                actionSection
+                
+                // 3. Payment History
+                historySection
             }
+            .padding()
         }
-        .navigationTitle("Loan Details")
+        .background(Color.lsBackground)
+        .navigationTitle(liveLoan.borrower_name ?? "Loan Ledger")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if [.active, .completed, .forgiven].contains(liveLoan.status) {
-                ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
                     Button {
                         showAgreementSheet = true
                     } label: {
-                        Image(systemName: "doc.text")
+                        Label("View Contract", systemImage: "doc.text")
                     }
+                    
+                    Button {
+                        showTermsSheet = true
+                    } label: {
+                        Label("View Terms", systemImage: "list.clipboard")
+                    }
+                    
+                    Button(role: .destructive) {
+                        if liveLoan.status == .draft {
+                            showDeleteDraftAlert = true
+                        } else if liveLoan.status == .sent {
+                            showCancelAlert = true
+                        } else {
+                            showForgiveAlert = true
+                        }
+                    } label: {
+                        Label(
+                            liveLoan.status == .draft ? "Delete Draft" :
+                            liveLoan.status == .sent ? "Cancel Request" : "Forgive Loan",
+                            systemImage: "trash"
+                        )
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
             }
+        }
+        .onAppear {
+            Task {
+                if let fetchedPayments = try? await loanManager.fetchPayments(for: liveLoan) {
+                    self.payments = fetchedPayments
+                }
+            }
+        }
+        .sheet(isPresented: $showPaymentSheet) {
+            PaymentSheet(loan: liveLoan, isPresented: $showPaymentSheet)
+                .onDisappear {
+                    Task {
+                        try? await loanManager.fetchLoans()
+                        self.payments = try await loanManager.fetchPayments(for: liveLoan)
+                    }
+                }
         }
         .sheet(isPresented: $showAgreementSheet) {
             NavigationStack {
                 ScrollView {
-                    Text(liveLoan.agreement_text ?? "No agreement text found.")
+                    Text(liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan))
                         .padding()
                 }
                 .navigationTitle("Agreement")
@@ -59,156 +121,181 @@ struct LoanDetailView: View {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Close") { showAgreementSheet = false }
                     }
+                    
+                    // Show "Sign" button if the current user needs to sign
+                    if (isLender && liveLoan.status == .draft && liveLoan.lender_signed_at == nil) ||
+                       (!isLender && liveLoan.status == .sent && liveLoan.borrower_signed_at == nil) {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button {
+                                Task {
+                                    do {
+                                        try await loanManager.signLoan(loan: liveLoan)
+                                        showAgreementSheet = false
+                                    } catch {
+                                        errorMsg = "Signing failed: \(error.localizedDescription)"
+                                        showError = true
+                                    }
+                                }
+                            } label: {
+                                Text("Sign & Accept")
+                                    .bold()
+                            }
+                        }
+                    }
                 }
             }
             .presentationDetents([.medium, .large])
         }
-        // Error Alert
+        .sheet(isPresented: $showTermsSheet) {
+            NavigationStack {
+                List {
+                    Section("Financial Terms") {
+                        LabeledContent("Principal", value: liveLoan.principal_amount.formatted(.currency(code: "USD")))
+                        LabeledContent("Interest Rate", value: "\(liveLoan.interest_rate.formatted())%")
+                        LabeledContent("Repayment", value: liveLoan.repayment_schedule)
+                        LabeledContent("Late Fee Policy", value: liveLoan.late_fee_policy)
+                    }
+                    Section("Dates") {
+                        if let created = liveLoan.created_at {
+                            LabeledContent("Created On", value: created.formatted(date: .abbreviated, time: .omitted))
+                        }
+                        LabeledContent("Maturity Date", value: liveLoan.maturity_date.formatted(date: .abbreviated, time: .omitted))
+                    }
+                    Section("Parties") {
+                        LabeledContent("Lender", value: lenderName)
+                        LabeledContent("Borrower", value: liveLoan.borrower_name ?? "Unknown")
+                    }
+                }
+                .navigationTitle("Loan Terms")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { showTermsSheet = false }
+                    }
+                }
+                .task {
+                    if isLender {
+                        lenderName = authManager.currentUserProfile?.fullName ?? "Me"
+                    } else {
+                        if let name = await authManager.fetchProfileName(for: liveLoan.lender_id) {
+                            lenderName = name
+                        } else {
+                            lenderName = "Unknown"
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        // Alerts...
         .alert("Error", isPresented: $showError) {
             Button("OK", role: .cancel) { }
-        } message: {
-            Text(errorMsg ?? "Unknown error")
-        }
-        // Paid Off Confirmation Alert
-        .alert("Mark as Paid Off?", isPresented: $showPaidOffAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Confirm Paid", role: .none) {
-                Task {
-                    do {
-                        try await loanManager.updateLoanStatus(liveLoan, status: .completed)
-                    } catch {
-                        errorMsg = error.localizedDescription
-                        showError = true
+        } message: { Text(errorMsg ?? "Unknown error") }
+            .alert("Mark as Paid Off?", isPresented: $showPaidOffAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Confirm Paid", role: .none) {
+                    Task {
+                        do {
+                            try await loanManager.updateLoanStatus(liveLoan, status: .completed)
+                        } catch {
+                            errorMsg = error.localizedDescription
+                            showError = true
+                        }
                     }
                 }
-            }
-        } message: {
-            Text("This will mark the loan as fully repaid and move it to history. This action cannot be undone.")
-        }
-        // Forgive Confirmation Alert
-        .alert("Forgive this Loan?", isPresented: $showForgiveAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Forgive Debt", role: .destructive) {
-                Task {
-                    do {
-                        try await loanManager.updateLoanStatus(liveLoan, status: .forgiven)
-                    } catch {
-                        errorMsg = error.localizedDescription
-                        showError = true
+            } message: { Text("This will mark the loan as fully repaid.") }
+            .alert("Forgive Loan?", isPresented: $showForgiveAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Forgive", role: .destructive) {
+                    Task {
+                        try? await loanManager.updateLoanStatus(liveLoan, status: .forgiven)
                     }
                 }
+            } message: { Text("This action cannot be undone.") }
+            .alert("Delete Draft?", isPresented: $showDeleteDraftAlert) {
+                Button("Delete", role: .destructive) {
+                    Task {
+                        try? await loanManager.deleteLoan(liveLoan)
+                        dismiss()
+                    }
+                }
+            } message: { Text("Permanently delete this draft?") }
+            .alert("Cancel Request?", isPresented: $showCancelAlert) {
+                Button("Keep Loan", role: .cancel) { }
+                Button("Cancel Loan", role: .destructive) {
+                    Task {
+                        try? await loanManager.updateLoanStatus(liveLoan, status: .cancelled)
+                    }
+                }
+            } message: { Text("This will cancel the loan and stop the signature process.") }
+            .alert("Verify Payment", isPresented: $showVerifyPaymentAlert, presenting: pendingPaymentToVerify) { payment in
+                Button("Reject", role: .destructive) {
+                    Task {
+                        try? await loanManager.updatePaymentStatus(payment: payment, newStatus: .rejected, loan: liveLoan)
+                        payments = try await loanManager.fetchPayments(for: liveLoan)
+                    }
+                }
+                Button("Confirm Received", role: .none) {
+                    Task {
+                        try? await loanManager.updatePaymentStatus(payment: payment, newStatus: .approved, loan: liveLoan)
+                        payments = try await loanManager.fetchPayments(for: liveLoan)
+                    }
+                }
+            } message: { payment in
+                Text("Did you receive \(payment.amount.formatted(.currency(code: "USD")))?")
             }
-        } message: {
-            Text("WARNING: Forgiving a loan means the borrower no longer owes you this money. \n\nIMPORTANT: Amounts over $18,000 (2024 limit) may be subject to Gift Tax reporting. Consult a tax professional.")
-        }
     }
     
-    // MARK: - Active/Closed View
-    var activeLoanView: some View {
-        VStack(spacing: 24) {
-            // Balance Card
-            VStack(spacing: 8) {
-                Text(liveLoan.status == .completed ? "Amount Paid" : (liveLoan.status == .forgiven ? "Amount Forgiven" : "Remaining Balance"))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                
-                Text(liveLoan.principal_amount, format: .currency(code: "USD"))
-                    .font(.system(size: 44, weight: .bold, design: .rounded))
-                    .foregroundStyle(liveLoan.status == .forgiven ? .gray : Color.lsPrimary)
-                    .strikethrough(liveLoan.status == .forgiven)
-                    .opacity(liveLoan.status == .forgiven ? 0.6 : 1.0)
-                
-                LoanStatusBadge(status: liveLoan.status)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 20)
+    // MARK: - Components
+    
+    var headerCard: some View {
+        VStack(spacing: 8) {
+            Text(liveLoan.status.title.uppercased())
+                .font(.caption)
+                .fontWeight(.bold)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Color.lsPrimary.opacity(0.1))
+                .foregroundStyle(Color.lsPrimary)
+                .cornerRadius(20)
             
-            // Stats Grid
-            HStack(spacing: 20) {
-                VStack(alignment: .leading) {
-                    Text("Interest Rate")
-                        .font(.caption)
-                        .foregroundStyle(.gray)
-                    Text(liveLoan.interest_rate, format: .percent)
-                        .font(.headline)
-                }
-                Divider()
-                VStack(alignment: .leading) {
-                    Text("Due Date")
-                        .font(.caption)
-                        .foregroundStyle(.gray)
-                    Text(liveLoan.maturity_date.formatted(date: .abbreviated, time: .omitted))
-                        .font(.headline)
-                }
-                Spacer()
-            }
-            .padding()
-            .background(Color.lsBackground)
-            .cornerRadius(12)
-            .padding(.horizontal)
+            Text((liveLoan.remaining_balance ?? liveLoan.principal_amount).formatted(.currency(code: "USD")))
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(Color.primary)
             
-            // Transactions Section
-            VStack(alignment: .leading, spacing: 16) {
-                
-                if liveLoan.status == .active {
-                    // Manual Payment Tip
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: "banknote")
-                            .foregroundStyle(.blue)
-                        Text("Payments are made outside the app (Venmo, Zelle, Cash). Record them here to update the balance.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding()
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(12)
-                } else if liveLoan.status == .completed {
-                     HStack(alignment: .top, spacing: 12) {
-                         Image(systemName: "checkmark.circle.fill")
-                             .foregroundStyle(.green)
-                         Text("This loan has been fully paid off.")
-                             .font(.subheadline)
-                             .foregroundStyle(.primary)
-                     }
-                     .frame(maxWidth: .infinity, alignment: .center)
-                     .padding()
-                     .background(Color.green.opacity(0.1))
-                     .cornerRadius(12)
-                } else if liveLoan.status == .forgiven {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: "hand.raised.fill")
-                            .foregroundStyle(.gray)
-                        Text("This loan was forgiven by the lender.")
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(12)
-               }
-                
-                HStack {
-                    Text("Transactions")
-                        .font(.headline)
-                    Spacer()
-                    if liveLoan.status == .active {
-                        Button("See All") { }
-                            .font(.subheadline)
-                    }
+            Text("Remaining Balance")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+        .background(Color.white)
+        .cornerRadius(16)
+        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+    }
+    
+    @ViewBuilder
+    var actionSection: some View {
+        VStack(spacing: 12) {
+            if liveLoan.status == .draft {
+                if isLender && liveLoan.lender_signed_at == nil {
+                    signButton
+                } else {
+                    Text("Waiting for signatures...")
+                        .foregroundStyle(.secondary)
                 }
-                
-                // Placeholder for now
-                if liveLoan.status == .active {
-                    ContentUnavailableView("No payments recorded", systemImage: "list.bullet.clipboard")
-                        .frame(height: 150)
-                        .background(Color(.secondarySystemBackground).opacity(0.5))
-                        .cornerRadius(12)
-                    
+            } else if liveLoan.status == .sent {
+                if !isLender {
+                    signButton
+                } else {
+                    Text("Waiting for borrower to sign...")
+                        .foregroundStyle(.secondary)
+                }
+            } else if liveLoan.status == .active {
+                if isLender {
                     Button {
-                        // TODO: Record Payment Action
+                        showPaidOffAlert = true
                     } label: {
-                        Label("Record Payment", systemImage: "plus")
+                        Text("Mark Fully Paid Off")
                             .bold()
                             .frame(maxWidth: .infinity)
                             .padding()
@@ -216,140 +303,130 @@ struct LoanDetailView: View {
                             .foregroundStyle(.white)
                             .cornerRadius(12)
                     }
-                    
-                    // Management Menu
-                    Menu {
-                        Button {
-                            showPaidOffAlert = true
-                        } label: {
-                            Label("Mark as Paid Off", systemImage: "checkmark.circle")
-                        }
-                        
-                        Button(role: .destructive) {
-                            showForgiveAlert = true
-                        } label: {
-                            Label("Forgive Debt", systemImage: "hand.raised.slash.fill")
-                        }
+                } else {
+                    Button {
+                        showPaymentSheet = true
                     } label: {
-                        Text("Manage Loan Status")
-                            .font(.subheadline)
-                            .padding()
+                        Text("Record Payment")
+                            .bold()
                             .frame(maxWidth: .infinity)
-                            .foregroundStyle(Color.lsTextSecondary)
+                            .padding()
+                            .background(Color.lsPrimary)
+                            .foregroundStyle(.white)
+                            .cornerRadius(12)
                     }
                 }
             }
-            .padding(.horizontal)
         }
-        .padding(.top)
     }
     
-    // MARK: - Draft/Pending View (Original)
-    var draftLoanView: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Header
-            HStack {
-                VStack(alignment: .leading) {
-                    Text(liveLoan.borrower_name ?? "Unknown Borrower")
-                        .font(.title)
-                        .bold()
-                    LoanStatusBadge(status: liveLoan.status)
-                }
-                Spacer()
-                Text(liveLoan.principal_amount, format: .currency(code: "USD"))
-                    .font(.title)
-                    .bold()
-                    .foregroundStyle(Color.lsPrimary)
-            }
-            .padding()
-                        Divider()
-                
-                // Safety Tip
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "exclamationmark.shield.fill")
-                        .foregroundStyle(.orange)
-                        .font(.title2)
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Safety Tip: When to Transfer Money")
-                            .font(.subheadline)
-                            .bold()
-                        
-                        Text("For your protection, do not transfer any funds until BOTH you and the borrower have fully signed this agreement.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding()
-                .background(Color.orange.opacity(0.1))
-                .cornerRadius(12)
-                .padding(.horizontal)
-                
-                Divider()
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Agreement")
-                    .font(.headline)
-                
-                ScrollView {
-                    Text(liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan))
-                        .font(.body)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-                }
-                .frame(height: 300) // Fixed height for agreement scroll
-            }
-            .padding()
+    @ViewBuilder
+    var historySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("History")
+                .font(.headline)
             
-            // Signing Section
-            if liveLoan.lender_signed_at == nil {
-                VStack(spacing: 12) {
-                    Text("By clicking below, you agree to the terms above and certify that this information is correct.")
-                        .font(.caption)
-                        .foregroundStyle(.gray)
-                        .multilineTextAlignment(.center)
-                    
-                    Button {
-                        Task {
-                            do {
-                                try await loanManager.signLoan(loan: liveLoan)
-                            } catch {
-                                print("Signing Error: \(error)")
-                                errorMsg = "Signing failed: \(error.localizedDescription)"
-                                showError = true
+            if payments.isEmpty {
+                Text("No payments recorded yet.")
+                    .foregroundStyle(.secondary)
+                    .italic()
+                    .padding(.vertical)
+            } else {
+                ForEach(payments) { payment in
+                    PaymentRow(payment: payment)
+                        .padding()
+                        .background(Color.white)
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.1), lineWidth: 1)
+                        )
+                        .onTapGesture {
+                            if isLender && payment.status == .pending {
+                                pendingPaymentToVerify = payment
+                                showVerifyPaymentAlert = true
                             }
                         }
-                    } label: {
-                        if loanManager.isLoading {
-                            ProgressView()
-                        } else {
-                            Text("I Agree & Sign")
-                                .bold()
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.lsPrimary)
-                                .foregroundColor(.white)
-                                .cornerRadius(12)
-                        }
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    var signButton: some View {
+        // 1. DRAFT: Lender needs to Review & Sign
+        if liveLoan.status == .draft && liveLoan.lender_signed_at == nil {
+            Button {
+                showAgreementSheet = true
+            } label: {
+                Text("Review & Sign Agreement")
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.lsPrimary)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            }
+        }
+        // 2. SENT: Borrower needs to Accept
+        else if liveLoan.status == .sent && !isLender && liveLoan.borrower_signed_at == nil {
+            Button {
+                showAgreementSheet = true
+            } label: {
+                Text("Review & Accept Loan")
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.lsPrimary)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            }
+        }
+        // 3. APPROVED: Lender needs to Confirm Funds
+        else if liveLoan.status == .approved {
+            if isLender {
+                Button {
+                    Task {
+                        try? await loanManager.confirmFunding(loan: liveLoan)
                     }
-                    .disabled(loanManager.isLoading)
+                } label: {
+                    HStack {
+                        Image(systemName: "paperplane.fill")
+                        Text("I Have Sent the Money")
+                    }
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.green) // Distinct Green
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
                 }
-                .padding()
             } else {
-                // Already Signed
+                // Borrower View
                 HStack {
-                    Image(systemName: "checkmark.seal.fill")
-                    .foregroundStyle(.green)
-                    Text("Signed by Lender on \(liveLoan.lender_signed_at!.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.subheadline)
-                        .foregroundStyle(.gray)
+                    Image(systemName: "hourglass")
+                    Text("Waiting for Lender to Release Funds")
                 }
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .padding()
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.green.opacity(0.1))
+                .background(Color.gray.opacity(0.1))
                 .cornerRadius(12)
-                .padding()
+            }
+        }
+        // 4. ACTIVE: Pay Button (Borrower only)
+        else if liveLoan.status == .active && !isLender {
+            Button {
+                showPaymentSheet = true
+            } label: {
+                 Text("Record Payment")
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.lsPrimary)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
             }
         }
     }

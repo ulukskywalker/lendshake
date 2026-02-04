@@ -8,53 +8,81 @@
 import SwiftUI
 
 struct LoanListView: View {
-    let loans: [Loan]
-    @Binding var selectedStatus: DashboardView.LoanFilter
     @Environment(LoanManager.self) var loanManager
     
     // For alert handling
     @State private var loanToDelete: Loan?
     @State private var showDeleteAlert: Bool = false
     
+    var activeLoans: [Loan] {
+        loanManager.loans.filter { $0.status == .active || $0.status == .sent }
+    }
+    
+    var draftLoans: [Loan] {
+        loanManager.loans.filter { $0.status == .draft }
+    }
+    
+    var historyLoans: [Loan] {
+        loanManager.loans.filter { $0.status == .completed || $0.status == .forgiven || $0.status == .cancelled }
+    }
+    
     var body: some View {
         List {
-            Section(header: headerView) {
-                if loans.isEmpty {
-                    ContentUnavailableView("No \(selectedStatus.rawValue) Shakes", systemImage: "doc.text.magnifyingglass")
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .padding(.top, 40)
-                } else {
-                    ForEach(loans) { loan in
-                        ZStack {
-                            // Navigation Link Hack to remove default arrow
-                            NavigationLink(destination: LoanDetailView(loan: loan)) {
-                                EmptyView()
-                            }
-                            .opacity(0)
-                            
-                            LoanCardView(loan: loan, isLender: loanManager.isLender(of: loan))
+            if loanManager.loans.isEmpty {
+                ContentUnavailableView("No Shakes Yet", systemImage: "doc.text.magnifyingglass")
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .padding(.top, 40)
+            } else {
+                // ACTIVE SECTION
+                if !activeLoans.isEmpty {
+                    Section {
+                        ForEach(activeLoans) { loan in
+                            loanRow(for: loan)
                         }
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if loan.status == .draft {
-                                Button(role: .destructive) {
-                                    loanToDelete = loan
-                                    showDeleteAlert = true
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+                    } header: {
+                        Text("Active Loans")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .textCase(nil) // Remove default UPPERCASE
+                            .padding(.vertical, 8)
+                    }
+                }
+                
+                // DRAFTS SECTION
+                if !draftLoans.isEmpty {
+                    Section {
+                        ForEach(draftLoans) { loan in
+                            loanRow(for: loan)
                         }
+                    } header: {
+                        Text("Drafts")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .textCase(nil)
+                            .padding(.vertical, 8)
+                    }
+                }
+                
+                // HISTORY SECTION
+                if !historyLoans.isEmpty {
+                    Section {
+                        ForEach(historyLoans) { loan in
+                            loanRow(for: loan)
+                        }
+                    } header: {
+                        Text("History")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                            .textCase(nil)
+                            .padding(.vertical, 8)
                     }
                 }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped) // The "Apple Standard" for grouped content
+        .scrollContentBackground(.hidden)
         .background(Color.lsBackground)
-        .scrollContentBackground(.hidden) // Important for List background
         .alert("Delete Draft Loan?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -69,36 +97,27 @@ struct LoanListView: View {
         }
     }
     
-    var headerView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(DashboardView.LoanFilter.allCases) { status in
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            selectedStatus = status
-                        }
-                    } label: {
-                        Text(status.rawValue)
-                            .font(.subheadline)
-                            .bold()
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(selectedStatus == status ? Color.lsPrimary : Color.white)
-                            .foregroundStyle(selectedStatus == status ? .white : .primary)
-                            .clipShape(Capsule())
-                            .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(selectedStatus == status ? Color.clear : Color.gray.opacity(0.1), lineWidth: 1)
-                            )
-                    }
+    @ViewBuilder
+    func loanRow(for loan: Loan) -> some View {
+        ZStack {
+            NavigationLink(destination: LoanDetailView(loan: loan)) {
+                EmptyView()
+            }
+            .opacity(0)
+            
+            LoanCardView(loan: loan, isLender: loanManager.isLender(of: loan))
+        }
+        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if loan.status == .draft {
+                Button(role: .destructive) {
+                    loanToDelete = loan
+                    showDeleteAlert = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
                 }
             }
-            .padding(.vertical, 12)
-            .padding(.horizontal)
         }
-        .background(Color.lsBackground.opacity(0.95))
-        .listRowInsets(EdgeInsets()) // Remove padding for header
     }
 }
 
@@ -106,57 +125,82 @@ struct LoanCardView: View {
     let loan: Loan
     let isLender: Bool
     
+    var statusColor: Color {
+        switch loan.status {
+        case .draft: return .gray
+        case .active: return .green
+        case .sent: return .blue
+        case .completed: return .green
+        case .forgiven: return .gray
+        default: return .gray
+        }
+    }
+    
+    var counterpartyName: String {
+        if isLender {
+            return loan.borrower_name ?? "Unknown Borrower"
+        } else {
+            return "Lender" // Placeholder until we have lender_name
+        }
+    }
+    
+    var roleText: String {
+        isLender ? "Lending" : "Borrowing"
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(isLender ? "LENDING TO" : "BORROWING FROM")
-                        .font(.caption2)
-                        .fontWeight(.heavy)
-                        .foregroundStyle(Color.lsTextSecondary)
-                        .tracking(0.5)
-                    
-                    Text(loan.borrower_name ?? "Unknown")
-                        .font(.headline)
-                        .foregroundStyle(Color.lsTextPrimary)
-                }
-                
-                Spacer()
-                
-                LoanStatusBadge(status: loan.status)
-            }
-            
-            Divider()
-                .opacity(0.5)
-            
-            HStack(alignment: .lastTextBaseline) {
-                VStack(alignment: .leading) {
-                    Text("Due Date")
-                        .font(.caption)
-                        .foregroundStyle(Color.lsTextSecondary)
-                    Text(loan.maturity_date.formatted(date: .abbreviated, time: .omitted))
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundStyle(Color.lsTextPrimary)
-                }
+            // Top Row: Name and Amount
+            HStack(alignment: .firstTextBaseline) {
+                Text(counterpartyName)
+                    .font(.headline)
+                    .foregroundStyle(Color.lsTextPrimary)
                 
                 Spacer()
                 
                 Text(loan.principal_amount, format: .currency(code: "USD"))
-                    .font(.title3)
+                    .font(.system(.title3, design: .rounded))
                     .bold()
-                    .foregroundStyle(Color.lsPrimary)
+                    .foregroundStyle(loan.status == .completed || loan.status == .forgiven ? .gray : Color.lsTextPrimary)
+            }
+            
+            // Bottom Row: Status Pill, Role, Detail
+            HStack(alignment: .center) {
+                // Status Pill
+                Text(loan.status.title)
+                    .font(.caption)
+                    .bold()
+                    .foregroundStyle(statusColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(statusColor.opacity(0.15))
+                    .clipShape(Capsule())
+                
+                // Role Indicator
+                Text("•  \(roleText)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                Spacer()
+                
+                // Contextual Detail
+                if loan.status == .active {
+                   Text("Current Balance")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if loan.status == .draft {
+                    Text(loan.created_at?.formatted(date: .abbreviated, time: .omitted) ?? "")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(16)
-        .background(Color.white)
-        .cornerRadius(16)
-        .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 4)
-        .padding(.horizontal)
+        .padding(.vertical, 4) // Give the card some breathing room inside the list row
+        .contentShape(Rectangle())
     }
 }
 
 #Preview {
-       LoanListView(loans: [], selectedStatus: Binding.constant(DashboardView.LoanFilter.active))
-           .environment(LoanManager())
-   }
+    LoanListView()
+        .environment(LoanManager())
+}

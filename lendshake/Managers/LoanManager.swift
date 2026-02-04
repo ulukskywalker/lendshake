@@ -9,9 +9,79 @@ import SwiftUI
 import Observation
 import Supabase
 
+enum LoanStatus: String, Codable, CaseIterable, Identifiable, Hashable {
+    case draft = "draft"
+    case sent = "sent"
+    case approved = "approved" // Borrower signed, waiting for funds
+    case active = "active"
+    case completed = "completed"
+    case forgiven = "forgiven"
+    case cancelled = "cancelled"
+    
+    var id: String { self.rawValue }
+    
+    var title: String {
+        switch self {
+        case .draft: return "Draft"
+        case .sent: return "Pending"
+        case .approved: return "Signed" // or "Funding Needed"
+        case .active: return "Active"
+        case .completed: return "Paid Off"
+        case .forgiven: return "Forgiven"
+        case .cancelled: return "Cancelled"
+        }
+    }
+}
+
+enum PaymentStatus: String, Codable, CaseIterable, Identifiable {
+    case pending = "pending"
+    case approved = "approved"
+    case rejected = "rejected"
+    
+    var id: String { self.rawValue }
+    
+    var title: String {
+        switch self {
+        case .pending: return "Pending Review"
+        case .approved: return "Approved"
+        case .rejected: return "Rejected"
+        }
+    }
+}
+
+enum PaymentType: String, Codable, CaseIterable, Identifiable {
+    case repayment = "repayment"
+    case funding = "funding"
+    
+    var id: String { self.rawValue }
+}
+
+struct Payment: Codable, Identifiable, Hashable {
+    var id: UUID?
+    let loan_id: UUID
+    let amount: Double
+    let date: Date
+    var status: PaymentStatus
+    var type: PaymentType // 'repayment' or 'funding'
+    let created_at: Date?
+    let proof_url: String?
+    
+    init(loanId: UUID, amount: Double, date: Date, type: PaymentType = .repayment, proofURL: String? = nil) {
+        self.id = nil
+        self.loan_id = loanId
+        self.amount = amount
+        self.date = date
+        self.status = .pending
+        self.type = type
+        self.proof_url = proofURL
+        self.created_at = nil
+    }
+}
+
 struct Loan: Codable, Identifiable, Hashable {
     var id: UUID?
     let lender_id: UUID
+    var borrower_id: UUID? // Optional: Links to auth.users once known/claimed
     let principal_amount: Double
     let interest_rate: Double
     let repayment_schedule: String
@@ -21,6 +91,7 @@ struct Loan: Codable, Identifiable, Hashable {
     let borrower_email: String?
     let borrower_phone: String?
     var status: LoanStatus
+    var remaining_balance: Double?
     let created_at: Date?
     
     // Agreement Fields
@@ -44,6 +115,7 @@ struct Loan: Codable, Identifiable, Hashable {
     ) {
         self.id = nil // Supabase will generate
         self.lender_id = lenderId
+        self.borrower_id = nil // Initially nil
         self.principal_amount = principal
         self.interest_rate = interest
         self.repayment_schedule = schedule
@@ -53,6 +125,7 @@ struct Loan: Codable, Identifiable, Hashable {
         self.borrower_email = borrowerEmail
         self.borrower_phone = borrowerPhone
         self.status = .draft
+        self.remaining_balance = principal // Initial balance = principal
         self.created_at = nil
         self.agreement_text = nil
         self.lender_signed_at = nil
@@ -78,15 +151,17 @@ class LoanManager {
         }
         
         do {
+            let userEmail = user.email ?? ""
+            
             let loans: [Loan] = try await supabase
                 .from("loans")
                 .select()
-                .eq("lender_id", value: user.id)
+                .or("lender_id.eq.\(user.id),borrower_email.eq.\(userEmail),borrower_id.eq.\(user.id)")
                 .order("created_at", ascending: false)
                 .execute()
                 .value
             
-            print("DEBUG: Fetched \(loans.count) loans.")
+            print("DEBUG: Fetched \(loans.count) loans for \(userEmail) (ID: \(user.id))")
             self.loans = loans
         } catch {
             print("DEBUG: Fetch Loans Error: \(error)")
@@ -149,7 +224,8 @@ class LoanManager {
         
         // Fetch Audit Trail IP
         let ipAddress = await fetchPublicIP()
-        let isLender = self.isLender(of: loan)
+        guard let user = supabase.auth.currentUser else { return }
+        let isLender = (loan.lender_id == user.id)
         
         guard let loanId = loan.id else { return }
         
@@ -190,12 +266,14 @@ class LoanManager {
                 let borrower_signed_at: Date
                 let borrower_ip: String?
                 let status: LoanStatus
+                let borrower_id: UUID // CLAIM the loan
             }
             
             let updateData = BorrowerSignUpdate(
                 borrower_signed_at: Date(),
                 borrower_ip: ipAddress,
-                status: .active
+                status: .approved, // Move to approved (waiting for funds), not active yet
+                borrower_id: user.id
             )
             
             try await supabase
@@ -239,6 +317,28 @@ class LoanManager {
         try await fetchLoans()
     }
     
+    func confirmFunding(loan: Loan) async throws {
+        guard loan.status == .approved else { return }
+        guard let loanId = loan.id else { return }
+        
+        // 1. Create Funding Transaction (Auto-approved)
+        var fundingPayment = Payment(
+            loanId: loanId,
+            amount: loan.principal_amount,
+            date: Date(),
+            type: .funding
+        )
+        fundingPayment.status = .approved
+        
+        try await supabase
+            .from("payments")
+            .insert(fundingPayment)
+            .execute()
+        
+        // 2. Set Status to Active
+        try await updateLoanStatus(loan, status: .active)
+    }
+    
     private func fetchPublicIP() async -> String? {
         guard let url = URL(string: "https://api.ipify.org") else { return nil }
         do {
@@ -253,6 +353,82 @@ class LoanManager {
     func isLender(of loan: Loan) -> Bool {
         guard let user = supabase.auth.currentUser else { return false }
         return loan.lender_id == user.id
+    }
+
+    
+    // MARK: - Payment Logic
+    
+    func fetchPayments(for loan: Loan) async throws -> [Payment] {
+        guard let loanId = loan.id else { return [] }
+        
+        let payments: [Payment] = try await supabase
+            .from("payments")
+            .select()
+            .eq("loan_id", value: loanId)
+            .order("date", ascending: false) // Newest first
+            .execute()
+            .value
+            
+        return payments
+    }
+    
+    func submitPayment(for loan: Loan, amount: Double, date: Date, proofURL: String?) async throws {
+        guard let loanId = loan.id else { return }
+        
+        let payment = Payment(loanId: loanId, amount: amount, date: date, proofURL: proofURL)
+        
+        try await supabase
+            .from("payments")
+            .insert(payment)
+            .execute()
+            
+        // No need to update loan balance yet, only on approval
+    }
+    
+    func updatePaymentStatus(payment: Payment, newStatus: PaymentStatus, loan: Loan) async throws {
+        guard let paymentId = payment.id else { return }
+        guard let loanId = loan.id else { return }
+        
+        // 1. Update Payment
+        struct PaymentUpdate: Encodable {
+            let status: PaymentStatus
+        }
+        
+        try await supabase
+            .from("payments")
+            .update(PaymentUpdate(status: newStatus))
+            .eq("id", value: paymentId)
+            .execute()
+            
+        // 2. If Approved, update Loan Balance
+        if newStatus == .approved {
+            // We need to fetch the fresh current balance to be safe, or calculate based on local 'liveLoan'
+            // For MVP, we'll trust the local + deduction, or better yet, trigger a DB function if possible.
+            // But here, client-side logic:
+            
+            let currentBalance = loan.remaining_balance ?? loan.principal_amount
+            let newBalance = max(0, currentBalance - payment.amount)
+            
+            struct BalanceUpdate: Encodable {
+                let remaining_balance: Double
+                let status: LoanStatus? // Check if fully paid
+            }
+            
+            var nextDetails = BalanceUpdate(remaining_balance: newBalance, status: nil)
+            
+            if newBalance <= 0 {
+                nextDetails = BalanceUpdate(remaining_balance: 0, status: .completed)
+            }
+            
+            try await supabase
+                .from("loans")
+                .update(nextDetails)
+                .eq("id", value: loanId)
+                .execute()
+                
+            // Refresh loans to get new balance
+            try await fetchLoans()
+        }
     }
 }
 
