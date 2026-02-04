@@ -12,12 +12,12 @@ struct ContentView: View {
         TabView {
             DashboardView()
                 .tabItem {
-                    Label("My Lends", systemImage: "banknote")
+                    Label("Home", systemImage: "house.fill")
                 }
             
             SettingsView()
                 .tabItem {
-                    Label("Settings", systemImage: "gear")
+                    Label("Profile", systemImage: "person.crop.circle.fill")
                 }
         }
         .tint(.lsPrimary)

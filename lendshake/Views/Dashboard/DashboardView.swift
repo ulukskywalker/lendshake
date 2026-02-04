@@ -27,7 +27,7 @@ struct DashboardView: View {
             case .active:
                 return loan.status == .active || loan.status == .sent
             case .completed:
-                return loan.status == .completed || loan.status == .cancelled
+                return loan.status == .completed || loan.status == .cancelled || loan.status == .forgiven
             }
         }
         print("DEBUG: Filtered \(loanManager.loans.count) loans (Status: \(selectedStatus.rawValue)) -> \(result.count) returned")
@@ -43,47 +43,7 @@ struct DashboardView: View {
                 Color.lsBackground.ignoresSafeArea()
                 
                 VStack(spacing: 0) {
-                    VStack(spacing: 0) {
-                        // Filter Chips
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(LoanFilter.allCases) { status in
-                                    Button {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                            selectedStatus = status
-                                        }
-                                    } label: {
-                                        Text(status.rawValue)
-                                            .font(.subheadline)
-                                            .bold()
-                                            .padding(.horizontal, 16)
-                                            .padding(.vertical, 8)
-                                            .background(selectedStatus == status ? Color.lsPrimary : Color.lsSecondary.opacity(0.1))
-                                            .foregroundStyle(selectedStatus == status ? .white : .primary)
-                                            .clipShape(Capsule())
-                                            .overlay(
-                                                Capsule()
-                                                    .strokeBorder(selectedStatus == status ? Color.clear : Color.gray.opacity(0.2), lineWidth: 1)
-                                            )
-                                    }
-                                }
-                            }
-                            .padding(.horizontal)
-                            .padding(.vertical, 8)
-                        }
-                        .background(Color.lsBackground)
-                        
-                        Group {
-                            if loanManager.isLoading {
-                                ProgressView("Loading...")
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            } else if filteredLoans.isEmpty {
-                                EmptyStateView()
-                            } else {
-                                LoanListView(loans: filteredLoans)
-                            }
-                        }
-                    }
+                LoanListView(loans: filteredLoans, selectedStatus: $selectedStatus)
                     
                     
                     

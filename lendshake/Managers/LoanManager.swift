@@ -27,6 +27,8 @@ struct Loan: Codable, Identifiable, Hashable {
     var agreement_text: String?
     var lender_signed_at: Date?
     var borrower_signed_at: Date?
+    var lender_ip: String?
+    var borrower_ip: String?
     
     // Helper to initialize for creation
     init(
@@ -55,6 +57,8 @@ struct Loan: Codable, Identifiable, Hashable {
         self.agreement_text = nil
         self.lender_signed_at = nil
         self.borrower_signed_at = nil
+        self.lender_ip = nil
+        self.borrower_ip = nil
     }
 }
 
@@ -139,51 +143,111 @@ class LoanManager {
         self.isLoading = true
         defer { self.isLoading = false }
         
-        guard let user = supabase.auth.currentUser else {
+        guard let _ = supabase.auth.currentUser else {
             throw AuthError.notAuthenticated
         }
         
-        // For MVP, we assume the current user is the Lender (since they created it)
-        // In a real multi-user app, we'd check user.id == loan.lender_id
-        
-        var updatedLoan = loan
-        updatedLoan.lender_signed_at = Date()
-        
-        // If agreement text isn't saved yet, save it now to lock it in
-        if updatedLoan.agreement_text == nil {
-            updatedLoan.agreement_text = AgreementGenerator.generate(for: loan)
-        }
-        
-        // Update status to 'sent' if it's currently 'draft'
-        if updatedLoan.status == .draft {
-            // We use a mutable copy of the struct to send to DB...
-        }
-        
-        // Supabase Patch
-        // We construct a partial update structure or dictionary
-        struct LoanUpdate: Encodable {
-            let lender_signed_at: Date
-            let agreement_text: String
-            let status: LoanStatus
-        }
-        
-        let updateData = LoanUpdate(
-            lender_signed_at: updatedLoan.lender_signed_at!,
-            agreement_text: updatedLoan.agreement_text!,
-            status: .sent
-        )
+        // Fetch Audit Trail IP
+        let ipAddress = await fetchPublicIP()
+        let isLender = self.isLender(of: loan)
         
         guard let loanId = loan.id else { return }
         
-        try await supabase
-            .from("loans")
-            .update(updateData)
-            .eq("id", value: loanId)
-            .execute()
+        if isLender {
+            // LENDER SIGNING
+            var updatedLoan = loan
+            updatedLoan.lender_signed_at = Date()
+            
+            // Generate agreement if missing
+            if updatedLoan.agreement_text == nil {
+                updatedLoan.agreement_text = AgreementGenerator.generate(for: loan)
+            }
+            
+            struct LenderSignUpdate: Encodable {
+                let lender_signed_at: Date
+                let agreement_text: String
+                let lender_ip: String?
+                let status: LoanStatus
+            }
+            
+            let updateData = LenderSignUpdate(
+                lender_signed_at: Date(),
+                agreement_text: updatedLoan.agreement_text!,
+                lender_ip: ipAddress,
+                status: .sent
+            )
+            
+            try await supabase
+                .from("loans")
+                .update(updateData)
+                .eq("id", value: loanId)
+                .execute()
+            
+        } else {
+            // BORROWER SIGNING
+            // Status moves to ACTIVE once borrower signs
+            struct BorrowerSignUpdate: Encodable {
+                let borrower_signed_at: Date
+                let borrower_ip: String?
+                let status: LoanStatus
+            }
+            
+            let updateData = BorrowerSignUpdate(
+                borrower_signed_at: Date(),
+                borrower_ip: ipAddress,
+                status: .active
+            )
+            
+            try await supabase
+                .from("loans")
+                .update(updateData)
+                .eq("id", value: loanId)
+                .execute()
+        }
         
         // Refresh
         try await fetchLoans()
-        print("Loan signed and status updated to 'sent'.")
+        print("Loan signed by \(isLender ? "Lender" : "Borrower"). Status updated. IP: \(ipAddress ?? "Unknown")")
+    }
+    
+    func deleteLoan(_ loan: Loan) async throws {
+        guard loan.status == .draft else { return } // Only allow deleting drafts
+        guard let id = loan.id else { return }
+        
+        try await supabase
+            .from("loans")
+            .delete()
+            .eq("id", value: id)
+            .execute()
+        
+        try await fetchLoans()
+    }
+    
+    func updateLoanStatus(_ loan: Loan, status: LoanStatus) async throws {
+        guard let id = loan.id else { return }
+        
+        struct StatusUpdate: Encodable {
+            let status: LoanStatus
+        }
+        
+        try await supabase
+            .from("loans")
+            .update(StatusUpdate(status: status))
+            .eq("id", value: id)
+            .execute()
+        
+        try await fetchLoans()
+    }
+    
+    private func fetchPublicIP() async -> String? {
+        guard let url = URL(string: "https://api.ipify.org") else { return nil }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            return String(data: data, encoding: .utf8)
+        } catch {
+            print("Failed to fetch IP: \(error)")
+            return nil
+        }
     }
     
     func isLender(of loan: Loan) -> Bool {

@@ -38,6 +38,38 @@ struct LoanConstructionView: View {
     
     var body: some View {
         Form {
+            Section {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("How it works", systemImage: "info.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(Color.lsPrimary)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top) {
+                            Text("1.")
+                                .bold()
+                                .foregroundStyle(.secondary)
+                            Text("Draft the loan terms below.")
+                        }
+                        HStack(alignment: .top) {
+                            Text("2.")
+                                .bold()
+                                .foregroundStyle(.secondary)
+                            Text("Review and sign the agreement.")
+                        }
+                        HStack(alignment: .top) {
+                            Text("3.")
+                                .bold()
+                                .foregroundStyle(.secondary)
+                            Text("Transfer funds **only after** both parties sign.")
+                        }
+                    }
+                    .font(.subheadline)
+                }
+                .padding(.vertical, 4)
+            }
+            .listRowBackground(Color.lsBackground)
+            
             Section(header: Text("Borrower")) {
                 Button {
                     showContactPicker = true
@@ -101,26 +133,48 @@ struct LoanConstructionView: View {
             }
             
             Section {
-                Button {
-                    Task {
-                        await createLoan()
-                    }
-                } label: {
-                    if loanManager.isLoading {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
+                HStack(spacing: 12) {
+                    // Save Button
+                    Button {
+                        Task {
+                            await createLoan(navigate: false)
                         }
-                    } else {
-                        Text("Draft Agreement")
-                            .frame(maxWidth: .infinity)
+                    } label: {
+                        Text("Save Draft")
                             .bold()
-                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.secondary.opacity(0.15))
+                            .foregroundStyle(Color.primary)
+                            .cornerRadius(10)
                     }
+                    .disabled(loanManager.isLoading)
+                    
+                    // Generate Button
+                    Button {
+                        Task {
+                            await createLoan(navigate: true)
+                        }
+                    } label: {
+                        if loanManager.isLoading {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        } else {
+                            Text("Review")
+                                .bold()
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(Color.lsPrimary)
+                                .foregroundStyle(.white)
+                                .cornerRadius(10)
+                        }
+                    }
+                    .disabled(principalAmount.isEmpty || loanManager.isLoading)
                 }
-                .disabled(principalAmount.isEmpty || loanManager.isLoading)
-                .listRowBackground(Color.lsPrimary)
+                .listRowInsets(EdgeInsets()) // Remove default list padding for custom look
+                .padding()
+                .background(Color.clear) // Transparent row
             }
         }
         .navigationTitle("New Loan")
@@ -129,7 +183,7 @@ struct LoanConstructionView: View {
         }
     }
     
-    private func createLoan() async {
+    private func createLoan(navigate: Bool) async {
         errorMessage = nil
         guard let principal = Double(principalAmount), principal > 0 else {
             errorMessage = "Please enter a valid principal amount."
@@ -165,8 +219,14 @@ struct LoanConstructionView: View {
                 borrowerEmail: borrowerEmail.isEmpty ? nil : borrowerEmail,
                 borrowerPhone: borrowerPhone.isEmpty ? nil : borrowerPhone
             )
-            // Navigate to the note
-            self.createdLoan = newLoan
+            
+            if navigate {
+                // Navigate to the note
+                self.createdLoan = newLoan
+            } else {
+                // Just dismiss
+                dismiss()
+            }
             
         } catch {
             errorMessage = "Failed to create draft: \(error.localizedDescription)"

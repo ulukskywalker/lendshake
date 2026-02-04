@@ -12,6 +12,7 @@ enum LoanStatus: String, Codable, CaseIterable, Hashable {
     case sent = "sent"
     case active = "active"
     case completed = "completed"
+    case forgiven = "forgiven"
     case cancelled = "cancelled"
     
     var title: String {
@@ -20,6 +21,7 @@ enum LoanStatus: String, Codable, CaseIterable, Hashable {
         case .sent: return "Pending"
         case .active: return "Active"
         case .completed: return "Paid Off"
+        case .forgiven: return "Forgiven"
         case .cancelled: return "Cancelled"
         }
     }
@@ -30,6 +32,7 @@ enum LoanStatus: String, Codable, CaseIterable, Hashable {
         case .sent: return .orange
         case .active: return .green
         case .completed: return .blue
+        case .forgiven: return .purple
         case .cancelled: return .red
         }
     }
