@@ -15,8 +15,19 @@
 		530EECA72F301AE90023473F /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 530EECA62F301AE90023473F /* Supabase */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		537A2ECD2F344233003BF7B6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 530EEC782F3012420023473F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 530EEC7F2F3012420023473F;
+			remoteInfo = lendshake;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		530EEC802F3012420023473F /* lendshake.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = lendshake.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		537A2EC92F344233003BF7B6 /* lendshakeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = lendshakeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -38,6 +49,11 @@
 			path = lendshake;
 			sourceTree = "<group>";
 		};
+		537A2ECA2F344233003BF7B6 /* lendshakeTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = lendshakeTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,6 +70,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		537A2EC62F344233003BF7B6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -61,6 +84,7 @@
 			isa = PBXGroup;
 			children = (
 				530EEC822F3012420023473F /* lendshake */,
+				537A2ECA2F344233003BF7B6 /* lendshakeTests */,
 				530EEC9B2F301AE90023473F /* Frameworks */,
 				530EEC812F3012420023473F /* Products */,
 			);
@@ -70,6 +94,7 @@
 			isa = PBXGroup;
 			children = (
 				530EEC802F3012420023473F /* lendshake.app */,
+				537A2EC92F344233003BF7B6 /* lendshakeTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -112,6 +137,29 @@
 			productReference = 530EEC802F3012420023473F /* lendshake.app */;
 			productType = "com.apple.product-type.application";
 		};
+		537A2EC82F344233003BF7B6 /* lendshakeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 537A2ECF2F344233003BF7B6 /* Build configuration list for PBXNativeTarget "lendshakeTests" */;
+			buildPhases = (
+				537A2EC52F344233003BF7B6 /* Sources */,
+				537A2EC62F344233003BF7B6 /* Frameworks */,
+				537A2EC72F344233003BF7B6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				537A2ECE2F344233003BF7B6 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				537A2ECA2F344233003BF7B6 /* lendshakeTests */,
+			);
+			name = lendshakeTests;
+			packageProductDependencies = (
+			);
+			productName = lendshakeTests;
+			productReference = 537A2EC92F344233003BF7B6 /* lendshakeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -124,6 +172,10 @@
 				TargetAttributes = {
 					530EEC7F2F3012420023473F = {
 						CreatedOnToolsVersion = 26.2;
+					};
+					537A2EC82F344233003BF7B6 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 530EEC7F2F3012420023473F;
 					};
 				};
 			};
@@ -145,12 +197,20 @@
 			projectRoot = "";
 			targets = (
 				530EEC7F2F3012420023473F /* lendshake */,
+				537A2EC82F344233003BF7B6 /* lendshakeTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		530EEC7E2F3012420023473F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		537A2EC72F344233003BF7B6 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -167,7 +227,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		537A2EC52F344233003BF7B6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		537A2ECE2F344233003BF7B6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 530EEC7F2F3012420023473F /* lendshake */;
+			targetProxy = 537A2ECD2F344233003BF7B6 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		530EEC892F3012430023473F /* Debug */ = {
@@ -384,6 +459,53 @@
 			};
 			name = Release;
 		};
+		537A2ED02F344233003BF7B6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3YZVH5K55A;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ulukskywalker.lendshake.lendshakeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/lendshake.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/lendshake";
+			};
+			name = Debug;
+		};
+		537A2ED12F344233003BF7B6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3YZVH5K55A;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ulukskywalker.lendshake.lendshakeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/lendshake.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/lendshake";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -401,6 +523,15 @@
 			buildConfigurations = (
 				530EEC8C2F3012430023473F /* Debug */,
 				530EEC8D2F3012430023473F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		537A2ECF2F344233003BF7B6 /* Build configuration list for PBXNativeTarget "lendshakeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				537A2ED02F344233003BF7B6 /* Debug */,
+				537A2ED12F344233003BF7B6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

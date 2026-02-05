@@ -22,6 +22,7 @@ class AuthManager {
     struct UserProfile: Decodable {
         let first_name: String?
         let last_name: String?
+        let residence_state: String? // Added state
         let phone_number: String? // Added phone number
         
         var fullName: String {

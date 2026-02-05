@@ -113,6 +113,10 @@ struct LoanDetailView: View {
         }
         .onAppear {
             Task {
+                // 1. Run Auto-Check for Fees (Catch-Up)
+                try? await loanManager.checkAutoEvents(for: liveLoan)
+                
+                // 2. Refresh Payments
                 if let fetchedPayments = try? await loanManager.fetchPayments(for: liveLoan) {
                     self.payments = fetchedPayments
                 }
@@ -141,11 +145,15 @@ struct LoanDetailView: View {
                 ScrollView {
                     Text(liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan))
                         .padding()
+                        .font(.system(.body, design: .monospaced))
                 }
-                .navigationTitle("Agreement")
+                .navigationTitle("Legal Agreement")
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { showAgreementSheet = false }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showAgreementSheet = false }
+                    }
+                    ToolbarItem(placement: .topBarLeading) {
+                        ShareLink(item: liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan))
                     }
                     
                     // Show "Sign" button if the current user needs to sign

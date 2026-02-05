@@ -11,6 +11,10 @@ struct LoanHeaderCard: View {
     let loan: Loan
     let isLender: Bool
     
+    var isOverdue: Bool {
+        Date() > loan.nextPaymentDate
+    }
+    
     var body: some View {
         VStack(spacing: 8) {
             Text(isLender ? "YOU ARE LENDING" : "YOU ARE BORROWING")
@@ -42,10 +46,22 @@ struct LoanHeaderCard: View {
                     VStack(spacing: 4) {
                         Text("Next Due")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(loan.nextPaymentDate.formatted(date: .abbreviated, time: .omitted))
-                            .font(.headline)
-                            .bold()
+                            .foregroundStyle(isOverdue ? .red : .secondary)
+                        
+                        if isOverdue {
+                            Text("OVERDUE")
+                                .font(.caption2)
+                                .bold()
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.red)
+                                .cornerRadius(4)
+                        } else {
+                            Text(loan.nextPaymentDate.formatted(date: .abbreviated, time: .omitted))
+                                .font(.headline)
+                                .bold()
+                        }
                     }
                     
                     VStack(spacing: 4) {

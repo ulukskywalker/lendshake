@@ -31,6 +31,9 @@ LendShake is a SwiftUI application designed to formalize personal lending. It al
 ### Phase 5: Dashboard & Journey
 - **Status Journey**: Visual tracker showing the loan's lifecycle (Agreement -> Funding -> Repayment -> Done).
 - **Borrower Dashboard**: Real-time "Next Due" dates and "Minimum Payment" calculations.
+- **Auto-Late Fees**: Automatically applies fees if a payment deadline is missed.
+- **Collapsible History**: Keeps the main view clean by archiving completed loans.
+- **Profile Settings**: Users can update their legal name and state of residence.
 
 
 ## 🛠 Tech Stack

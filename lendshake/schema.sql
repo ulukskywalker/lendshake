@@ -24,8 +24,9 @@ create table if not exists public.loans (
   created_at timestamptz default now(),
   lender_id uuid references auth.users not null,
   borrower_id uuid references auth.users,
-  principal_amount float8 not null,
-  interest_rate float8 not null,
+  principal_amount numeric not null,
+  interest_rate numeric not null,
+  interest_type text default 'percentage', -- 'percentage' or 'fixed'
   repayment_schedule text not null,
   late_fee_policy text not null,
   maturity_date timestamptz not null,
@@ -33,8 +34,12 @@ create table if not exists public.loans (
   borrower_email text,
   borrower_phone text,
   status text not null,
-  remaining_balance float8,
+  remaining_balance numeric, -- Can be null (if Draft)
+  created_at timestamptz default now(),
+  
+  -- Agreements
   agreement_text text,
+  release_document_text text, -- "Paid in Full" receipt
   lender_signed_at timestamptz,
   borrower_signed_at timestamptz,
   lender_ip text,

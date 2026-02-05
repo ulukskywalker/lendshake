@@ -100,11 +100,14 @@ struct LoanListView: View {
                 // 4. HISTORY SECTION
                 if !historyLoans.isEmpty {
                     Section {
-                        ForEach(historyLoans) { loan in
-                            loanRow(for: loan)
+                        DisclosureGroup("Show History (\(historyLoans.count))") {
+                            ForEach(historyLoans) { loan in
+                                loanRow(for: loan)
+                            }
                         }
+                        .tint(.secondary)
                     } header: {
-                        Text("History")
+                        Text("Completed")
                             .font(.headline)
                             .foregroundStyle(.secondary)
                             .textCase(nil)

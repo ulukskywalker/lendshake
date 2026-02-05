@@ -9,6 +9,208 @@ import SwiftUI
 import Observation
 import Supabase
 
+extension LoanManager {
+    // MARK: - Auto-Events (Catch-Up Logic)
+    
+    func checkAutoEvents(for loan: Loan) async throws {
+        // Only active loans accrue fees
+        guard loan.status == .active else { return }
+        
+        // Check if Late Fee Policy exists
+        guard let feeAmount = loan.lateFeeAmount, feeAmount > 0 else { return }
+        
+        // Grace Period
+        let graceDays = loan.gracePeriodDays
+        
+        // Determine Deadlines
+        var deadlines: [Date] = []
+        let schedule = loan.repayment_schedule.lowercased()
+        let now = Date()
+        let calendar = Calendar.current
+        
+        if schedule.contains("month") {
+            // Monthly Schedule
+            // Start from creation/start date
+            let startDate = loan.created_at ?? loan.maturity_date // Fallback
+            // Loop dates until maturity or now
+            
+            // Safety: Limit loop
+            var checkDate = startDate
+            let dayComponent = calendar.component(.day, from: startDate)
+            
+            // Advance to first month anniversary
+            if let firstDue = calendar.date(byAdding: .month, value: 1, to: startDate) {
+                checkDate = firstDue
+            }
+            
+            while checkDate <= now {
+                deadlines.append(checkDate)
+                guard let next = calendar.date(byAdding: .month, value: 1, to: checkDate) else { break }
+                checkDate = next
+            }
+        } else {
+            // Lump Sum / Default
+            deadlines.append(loan.maturity_date)
+        }
+        
+        // Fetch existing fees
+        let existingPayments = try await fetchPayments(for: loan)
+        
+        // 1. Calculate Missing Late Fees
+        let missingFeesCount = LoanMath.calculateMissingLateFees(for: loan, existingPayments: existingPayments)
+        
+        var feesToAdd: [Payment] = []
+        var balanceIncrease: Double = 0
+        
+        if missingFeesCount > 0 {
+            print("DEBUG: Catch-Up found \(missingFeesCount) missing late fees.")
+            
+            for _ in 0..<missingFeesCount {
+                let newFee = Payment(
+                    loanId: loan.id!,
+                    amount: feeAmount,
+                    date: now, // Created now
+                    type: .lateFee
+                )
+                feesToAdd.append(newFee)
+                balanceIncrease += feeAmount
+            }
+        }
+        
+        // Execute Batch
+        if !feesToAdd.isEmpty {
+            for var fee in feesToAdd {
+                fee.status = .approved
+                try await supabase.from("payments").insert(fee).execute()
+            }
+            // Update Balance logic...
+            let currentBalance = loan.remaining_balance ?? loan.principal_amount
+            let newBalance = currentBalance + balanceIncrease
+            
+            // struct BalanceUpdate removed - using file-level helper
+            try await supabase.from("loans").update(BalanceUpdate(remaining_balance: newBalance, status: nil, release_document_text: nil)).eq("id", value: loan.id!).execute()
+            
+            try await fetchLoans()
+        }
+        
+        // 2. Check Interest
+        try await checkInterest(for: loan)
+    }
+    
+    private func checkInterest(for loan: Loan) async throws {
+        // Only active loans accrue interest
+        guard loan.status == .active else { return }
+        
+        // Handle Fixed vs Percentage
+        if loan.interest_type == .fixed {
+            // FIXED FEE LOGIC
+            // Ensure the one-time fee is applied
+            guard loan.interest_rate > 0 else { return } // Here rate is the amount
+            
+            let existingPayments = try await fetchPayments(for: loan)
+            let hasInterest = existingPayments.contains { $0.type == .interest }
+            
+            if !hasInterest {
+                // Apply the One-Time Fixed Fee
+                let feePayment = Payment(
+                    loanId: loan.id!,
+                    amount: loan.interest_rate, // stored as double
+                    date: loan.created_at ?? Date(),
+                    type: .interest
+                )
+                
+                var payment = feePayment
+                payment.status = .approved
+                try await supabase.from("payments").insert(payment).execute()
+                
+                // Update Balance
+                let currentBalance = loan.remaining_balance ?? loan.principal_amount
+                let newBalance = currentBalance + loan.interest_rate
+                
+                try await supabase
+                    .from("loans")
+                    .update(BalanceUpdate(remaining_balance: newBalance, status: nil, release_document_text: nil))
+                    .eq("id", value: loan.id!)
+                    .execute()
+                
+                try await fetchLoans()
+            }
+            
+        } else {
+            // PERCENTAGE LOGIC (Monthly)
+            guard loan.interest_rate > 0 else { return }
+            
+            let calendar = Calendar.current
+            let now = Date()
+            let start = loan.created_at ?? loan.maturity_date // Fallback
+            
+            // Interest accrues monthly on the anniversary of the creation date
+            // e.g. Created Jan 5 -> Interest on Feb 5, Mar 5...
+            
+            var interestDates: [Date] = []
+            var checkDate = start
+            
+            // Advance to first month
+            if let first = calendar.date(byAdding: .month, value: 1, to: start) {
+                checkDate = first
+            } else { return }
+            
+            while checkDate <= now {
+                interestDates.append(checkDate)
+                guard let next = calendar.date(byAdding: .month, value: 1, to: checkDate) else { break }
+                checkDate = next
+            }
+            
+            if interestDates.isEmpty { return }
+            
+            // Fetch existing Interest payments to avoid duplicates
+            let existingPayments = try await fetchPayments(for: loan)
+            
+            // Calculate Missing Interest
+            let (missingCount, monthlyAmount) = LoanMath.calculateMissingInterest(for: loan, existingPayments: existingPayments)
+            
+            var interestToAdd: [Payment] = []
+            var balanceIncrease: Double = 0
+            
+            if missingCount > 0 {
+                print("DEBUG: Catch-Up found \(missingCount) missing interest payments.")
+                
+                for _ in 0..<missingCount {
+                    let newInterest = Payment(
+                        loanId: loan.id!,
+                        amount: monthlyAmount,
+                        date: now, // Recorded NOW
+                        type: .interest
+                    )
+                    interestToAdd.append(newInterest)
+                    balanceIncrease += monthlyAmount
+                }
+            }
+            
+            // Batch Insert
+            if !interestToAdd.isEmpty {
+                for var payment in interestToAdd {
+                    payment.status = .approved
+                    try await supabase.from("payments").insert(payment).execute()
+                }
+                
+                // Update Balance
+                let currentBalance = loan.remaining_balance ?? loan.principal_amount
+                let newBalance = currentBalance + balanceIncrease
+                
+                try await supabase
+                    .from("loans")
+                    .update(BalanceUpdate(remaining_balance: newBalance, status: nil, release_document_text: nil))
+                    .eq("id", value: loan.id!)
+                    .execute()
+                
+                try await fetchLoans()
+            }
+        }
+    }
+}
+
+
 
 
 @MainActor
@@ -49,6 +251,7 @@ class LoanManager {
     func createDraftLoan(
         principal: Double,
         interest: Double,
+        interestType: LoanInterestType = .percentage,
         schedule: String,
         lateFee: String,
         maturity: Date,
@@ -67,6 +270,7 @@ class LoanManager {
             lenderId: user.id,
             principal: principal,
             interest: interest,
+            interestType: interestType,
             schedule: schedule,
             lateFee: lateFee,
             maturity: maturity,
@@ -313,15 +517,16 @@ class LoanManager {
             let currentBalance = loan.remaining_balance ?? loan.principal_amount
             let newBalance = max(0, currentBalance - payment.amount)
             
-            struct BalanceUpdate: Encodable {
-                let remaining_balance: Double
-                let status: LoanStatus? // Check if fully paid
-            }
+            // struct BalanceUpdate removed - using file-level helper
             
-            var nextDetails = BalanceUpdate(remaining_balance: newBalance, status: nil)
+            var nextDetails: BalanceUpdate
             
             if newBalance <= 0 {
-                nextDetails = BalanceUpdate(remaining_balance: 0, status: .completed)
+                // Generate Release Document
+                let releaseDoc = AgreementGenerator.generateRelease(for: loan)
+                nextDetails = BalanceUpdate(remaining_balance: 0, status: .completed, release_document_text: releaseDoc)
+            } else {
+                nextDetails = BalanceUpdate(remaining_balance: newBalance, status: nil, release_document_text: nil)
             }
             
             try await supabase
@@ -334,6 +539,13 @@ class LoanManager {
             try await fetchLoans()
         }
     }
+}
+
+// Helper struct for update
+struct BalanceUpdate: Encodable {
+    let remaining_balance: Double
+    let status: LoanStatus?
+    let release_document_text: String?
 }
 
 enum AuthError: Error {

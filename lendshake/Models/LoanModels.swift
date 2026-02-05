@@ -34,6 +34,20 @@ enum LoanStatus: String, Codable, CaseIterable, Identifiable, Hashable {
     }
 }
 
+enum LoanInterestType: String, Codable, CaseIterable, Identifiable {
+    case percentage = "percentage"
+    case fixed = "fixed"
+    
+    var id: String { self.rawValue }
+    
+    var title: String {
+        switch self {
+        case .percentage: return "Percentage (%)"
+        case .fixed: return "Fixed Fee ($)"
+        }
+    }
+}
+
 enum PaymentStatus: String, Codable, CaseIterable, Identifiable {
     case pending = "pending"
     case approved = "approved"
@@ -53,8 +67,19 @@ enum PaymentStatus: String, Codable, CaseIterable, Identifiable {
 enum PaymentType: String, Codable, CaseIterable, Identifiable {
     case repayment = "repayment"
     case funding = "funding"
+    case lateFee = "late_fee"
+    case interest = "interest"
     
     var id: String { self.rawValue }
+    
+    var title: String {
+        switch self {
+        case .repayment: return "Repayment"
+        case .funding: return "Funding"
+        case .lateFee: return "Late Fee"
+        case .interest: return "Interest"
+        }
+    }
 }
 
 struct Payment: Codable, Identifiable, Hashable {
@@ -85,6 +110,7 @@ struct Loan: Codable, Identifiable, Hashable {
     var borrower_id: UUID? // Optional: Links to auth.users once known/claimed
     let principal_amount: Double
     let interest_rate: Double
+    var interest_type: LoanInterestType? // Optional for backward compatibility, defaults to .percentage if nil
     let repayment_schedule: String
     let late_fee_policy: String
     let maturity_date: Date
@@ -102,23 +128,29 @@ struct Loan: Codable, Identifiable, Hashable {
     var lender_ip: String?
     var borrower_ip: String?
     
+    // Phase 5 Closeout
+    var release_document_text: String? // "Paid in Full" receipt
+    
     // Helper to initialize for creation
     init(
         lenderId: UUID,
         principal: Double,
         interest: Double,
+        interestType: LoanInterestType = .percentage,
         schedule: String,
         lateFee: String,
         maturity: Date,
         borrowerName: String?,
         borrowerEmail: String?,
-        borrowerPhone: String?
+        borrowerPhone: String?,
+        createdAt: Date? = nil
     ) {
         self.id = nil // Supabase will generate
         self.lender_id = lenderId
         self.borrower_id = nil // Initially nil
         self.principal_amount = principal
         self.interest_rate = interest
+        self.interest_type = interestType
         self.repayment_schedule = schedule
         self.late_fee_policy = lateFee
         self.maturity_date = maturity
@@ -127,8 +159,9 @@ struct Loan: Codable, Identifiable, Hashable {
         self.borrower_phone = borrowerPhone
         self.status = .draft
         self.remaining_balance = principal // Initial balance = principal
-        self.created_at = nil
+        self.created_at = createdAt
         self.agreement_text = nil
+        self.release_document_text = nil
         self.lender_signed_at = nil
         self.borrower_signed_at = nil
         self.lender_ip = nil
@@ -193,5 +226,31 @@ struct Loan: Codable, Identifiable, Hashable {
         
         // Lump Sum -> Full Balance
         return balance
+    }
+    
+    // MARK: - Late Fee Logic
+    
+    var lateFeeAmount: Double? {
+        // Parse "$15 after 5 days" -> 15.0
+        // Simple regex or string search
+        let policy = late_fee_policy
+        // Try to find "$" followed by digits
+        if let range = policy.range(of: "\\$[0-9]+", options: .regularExpression) {
+            let stringVal = policy[range].dropFirst() // remove $
+            return Double(stringVal)
+        }
+        return nil
+    }
+    
+    var gracePeriodDays: Int {
+        // Parse "after 5 days"
+        // Look for digit before "day"
+        // Default to 5 if not found but policy exists
+        if late_fee_policy.isEmpty || late_fee_policy.lowercased() == "none" { return 0 }
+        
+        // Simple heuristic: extract first number not attached to $?
+        // Or strictly look for "X days"
+        // Let's default to 5 for MVP if parsing fails but amount exists
+        return 5
     }
 }

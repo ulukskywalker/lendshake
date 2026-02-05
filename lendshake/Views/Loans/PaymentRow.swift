@@ -32,34 +32,88 @@ struct PaymentRow: View {
                 Text(payment.amount.formatted(.currency(code: "USD")))
                     .bold()
                     .foregroundStyle(.blue)
-            } else {
-                // Formatting for Repayments
+            } else if payment.type == .lateFee {
+                 // LATE FEE
+                 VStack(alignment: .leading) {
+                     HStack {
+                         Image(systemName: "exclamationmark.circle.fill")
+                             .foregroundStyle(.red)
+                         Text("Late Fee")
+                             .font(.headline)
+                             .foregroundStyle(.red)
+                     }
+                     Text(payment.date.formatted(date: .abbreviated, time: .shortened))
+                         .font(.caption)
+                         .foregroundStyle(.secondary)
+                         .padding(.leading, 26)
+                 }
+                 
+                 Spacer()
+                 
+                 Text("+" + payment.amount.formatted(.currency(code: "USD")))
+                     .bold()
+                     .foregroundStyle(.red)
+            } else if payment.type == .interest {
+                // INTEREST
                 VStack(alignment: .leading) {
-                    Text(payment.amount.formatted(.currency(code: "USD")))
-                        .bold()
-                    
-                    HStack(spacing: 4) {
-                        Text(payment.date.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        
-                        if payment.proof_url != nil {
-                            Image(systemName: "paperclip")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+                    HStack {
+                        Image(systemName: "percent")
+                            .foregroundStyle(.purple)
+                            .padding(6)
+                            .background(Circle().fill(Color.purple.opacity(0.1)))
+                        Text("Interest Accrued")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
                     }
+                    Text(payment.date.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 38)
                 }
                 
                 Spacer()
                 
-                Text(payment.status.title)
+                Text("+" + payment.amount.formatted(.currency(code: "USD")))
+                    .bold()
+                    .foregroundStyle(.purple)
+            } else {
+                // Formatting for Repayments
+                VStack(alignment: .leading) {
+                    HStack {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("Repayment")
+                            .font(.headline)
+                    }
+                    
+                    HStack(spacing: 4) {
+                        Text(payment.date.formatted(date: .abbreviated, time: .shortened))
+                        
+                        if payment.proof_url != nil {
+                            Image(systemName: "paperclip")
+                                .font(.caption2)
+                        }
+                    }
                     .font(.caption)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(statusColor.opacity(0.1))
-                    .foregroundStyle(statusColor)
-                    .cornerRadius(8)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 26)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(payment.amount.formatted(.currency(code: "USD")))
+                        .bold()
+                    
+                    Text(payment.status.title)
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(statusColor.opacity(0.1))
+                        .foregroundStyle(statusColor)
+                        .cornerRadius(8)
+                }
             }
         }
         .padding(.vertical, 4)

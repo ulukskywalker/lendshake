@@ -18,6 +18,17 @@ struct AgreementGenerator {
         let lenderName = "Lender" // Ideally we fetch current user's name, but for MVP "Lender"
         let borrowerName = loan.borrower_name ?? "Borrower"
         
+        let interest = loan.interest_rate
+        let interestClause: String
+        
+        if interest == 0 {
+             interestClause = "This Note shall bear no interest."
+        } else if loan.interest_type == .fixed {
+             interestClause = "The Borrower shall pay a fixed interest fee of \(interest.formatted(.currency(code: "USD"))), which shall be added to the Principal amount."
+        } else {
+             interestClause = "This Note bears interest at a rate of \(interest)% per annum."
+        }
+        
         return """
         PROMISSORY NOTE
         
@@ -31,7 +42,7 @@ struct AgreementGenerator {
         The Lender agrees to lend the Borrower the principal sum of \(principalString).
         
         3. INTEREST
-        This Note bears interest at a rate of \(loan.interest_rate)% per annum.
+        \(interestClause)
         
         4. REPAYMENT
         The Borrower agrees to repay the full principal and accrued interest by \(dateString).

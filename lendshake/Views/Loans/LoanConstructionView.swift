@@ -43,6 +43,7 @@ struct LoanConstructionView: View {
     @State private var principalAmount: String = ""
     @State private var isFamilyRate: Bool = true
     @State private var interestRate: String = ""
+    @State private var interestType: LoanInterestType = .percentage
     @State private var repaymentSchedule: RepaymentSchedule = .monthly
     @State private var maturityDate: Date = Date().addingTimeInterval(86400 * 30 * 6) // Default 6 months
     @State private var borrowerFirstName: String = ""
@@ -246,6 +247,44 @@ struct LoanConstructionView: View {
                     .font(.title2)
                     .bold()
                     .padding(.top)
+                
+                // Interest Section
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Interest")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    
+                    VStack {
+                        // Type Selector
+                        Picker("Interest Type", selection: $interestType) {
+                            ForEach(LoanInterestType.allCases) { type in
+                                Text(type.title).tag(type)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.bottom, 8)
+                        
+                        // Input Field
+                        HStack {
+                            Text(interestType == .percentage ? "%" : "$")
+                                .font(.title2)
+                                .bold()
+                                .foregroundStyle(Color.lsPrimary)
+                            
+                            TextField("0", text: $interestRate)
+                                .keyboardType(.decimalPad)
+                                .font(.system(size: 32, weight: .bold, design: .rounded))
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                    .padding()
+                    .background(Color.white)
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.gray.opacity(0.1), lineWidth: 1)
+                    )
+                }
                 
                 // Frequency Chips
                 VStack(alignment: .leading, spacing: 8) {
@@ -543,6 +582,7 @@ struct LoanConstructionView: View {
             let newLoan = try await loanManager.createDraftLoan(
                 principal: principal,
                 interest: interest,
+                interestType: interestType,
                 schedule: repaymentSchedule.rawValue,
                 lateFee: lateFeePolicy,
                 maturity: maturityDate,
