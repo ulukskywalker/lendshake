@@ -28,6 +28,11 @@ LendShake is a SwiftUI application designed to formalize personal lending. It al
   - Uses **Supabase Storage** (Private Buckets) with **Signed URLs** for security.
 - **Lender Verification**: Lenders verify each payment ("Approve" or "Reject").
 
+### Phase 5: Dashboard & Journey
+- **Status Journey**: Visual tracker showing the loan's lifecycle (Agreement -> Funding -> Repayment -> Done).
+- **Borrower Dashboard**: Real-time "Next Due" dates and "Minimum Payment" calculations.
+
+
 ## 🛠 Tech Stack
 
 - **Frontend**: SwiftUI (iOS 17+)

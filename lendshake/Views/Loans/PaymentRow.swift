@@ -37,9 +37,18 @@ struct PaymentRow: View {
                 VStack(alignment: .leading) {
                     Text(payment.amount.formatted(.currency(code: "USD")))
                         .bold()
-                    Text(payment.date.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    
+                    HStack(spacing: 4) {
+                        Text(payment.date.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        
+                        if payment.proof_url != nil {
+                            Image(systemName: "paperclip")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 
                 Spacer()
@@ -54,48 +63,6 @@ struct PaymentRow: View {
             }
         }
         .padding(.vertical, 4)
-        .overlay(alignment: .trailing) {
-            // Show Proof Button if URL exists (exclude Funding events which utilize type)
-            // Funding event handles its own unique display
-            if let path = payment.proof_url, payment.type != .funding {
-                Button {
-                    fetchAndShowProof(path: path)
-                } label: {
-                    Image(systemName: "photo.badge.checkmark")
-                        .foregroundStyle(.gray)
-                }
-                .padding(.trailing, 80) // Offset from status badge
-            }
-        }
-        .sheet(item: $proofURL) { url in
-            NavigationStack {
-                AsyncImage(url: url) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: {
-                    ProgressView()
-                }
-                .navigationTitle("Proof of Payment")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { proofURL = nil }
-                    }
-                }
-            }
-        }
-    }
-    
-    @State private var proofURL: URL? = nil
-    
-    private func fetchAndShowProof(path: String) {
-        Task {
-            do {
-                if let url = try await StorageManager.shared.getSignedURL(path: path) {
-                    proofURL = url
-                }
-            } catch {
-                print("Failed to get signed URL: \(error)")
-            }
-        }
     }
     
     var statusColor: Color {

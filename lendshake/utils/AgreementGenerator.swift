@@ -46,4 +46,34 @@ struct AgreementGenerator {
         IN WITNESS WHEREOF, the parties execute this Note as of the dates set forth below.
         """
     }
+    
+    static func generateRelease(for loan: Loan) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        
+        let principalString = formatter.string(from: NSNumber(value: loan.principal_amount)) ?? "$\(loan.principal_amount)"
+        let dateString = Date().formatted(date: .long, time: .omitted)
+        let borrowerName = loan.borrower_name ?? "Borrower"
+        
+        return """
+        RELEASE OF PROMISSORY NOTE
+        
+        Date: \(dateString)
+        
+        1. RECITALS
+        Reference is made to that certain Promissory Note in the original principal amount of \(principalString) made by \(borrowerName) ("Borrower").
+        
+        2. SATISFACTION
+        The Lender acknowledges that the Borrower has satisfied all obligations under the Note. The debt is hereby discharged in full.
+        
+        3. RELEASE
+        The Lender hereby releases and forever discharges the Borrower from any and all claims, demands, and liabilities arising out of or relating to the Note.
+        
+        4. CANCELLATION
+        The original Note is hereby cancelled and rendered void.
+        
+        [ ELECTRONICALLY GENERATED ON LENDSHAKE ]
+        """
+    }
 }

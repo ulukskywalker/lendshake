@@ -18,20 +18,23 @@ struct LoanDetailView: View {
     
     // Alert States
     @State private var showForgiveAlert: Bool = false
-    @State private var showPaidOffAlert: Bool = false
+
     @State private var showDeleteDraftAlert: Bool = false
     @State private var showCancelAlert: Bool = false
     
     @State private var showAgreementSheet: Bool = false
     @State private var showProofSheet: Bool = false
     @State private var showTermsSheet: Bool = false
+    @State private var showReleaseSheet: Bool = false
+    @State private var showFundingSheet: Bool = false
     @State private var lenderName: String = "Loading..."
     
     // Ledger States
     @State private var payments: [Payment] = []
     @State private var showPaymentSheet: Bool = false
-    @State private var pendingPaymentToVerify: Payment?
-    @State private var showVerifyPaymentAlert: Bool = false
+    @State private var selectedPayment: Payment? // For detailed view
+
+
     
     // Find the latest version of this loan from the manager to ensure UI updates
     var liveLoan: Loan {
@@ -45,8 +48,11 @@ struct LoanDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
+                // 0. Journey Tracker
+                LoanJourneyView(status: liveLoan.status, isLender: isLender)
+                
                 // 1. Header Card
-                headerCard
+                LoanHeaderCard(loan: liveLoan, isLender: isLender)
                 
                 // 2. Action Buttons
                 actionSection
@@ -55,6 +61,14 @@ struct LoanDetailView: View {
                 historySection
             }
             .padding()
+        }
+        .refreshable {
+            do {
+                try await loanManager.fetchLoans()
+                self.payments = try await loanManager.fetchPayments(for: liveLoan)
+            } catch {
+                print("Refresh Error: \(error)")
+            }
         }
         .background(Color.lsBackground)
         .navigationTitle(liveLoan.borrower_name ?? "Loan Ledger")
@@ -74,20 +88,23 @@ struct LoanDetailView: View {
                         Label("View Terms", systemImage: "list.clipboard")
                     }
                     
-                    Button(role: .destructive) {
-                        if liveLoan.status == .draft {
-                            showDeleteDraftAlert = true
-                        } else if liveLoan.status == .sent {
-                            showCancelAlert = true
-                        } else {
-                            showForgiveAlert = true
+                    if isLender {
+                        Button(role: .destructive) {
+                            if liveLoan.status == .draft {
+                                showDeleteDraftAlert = true
+                            } else if liveLoan.status == .sent {
+                                showCancelAlert = true
+                            } else if liveLoan.status == .active {
+                                showForgiveAlert = true
+                            }
+                        } label: {
+                            Label(
+                                liveLoan.status == .draft ? "Delete Draft" :
+                                liveLoan.status == .sent ? "Cancel Request" :
+                                liveLoan.status == .active ? "Forgive Loan" : "",
+                                systemImage: "trash"
+                            )
                         }
-                    } label: {
-                        Label(
-                            liveLoan.status == .draft ? "Delete Draft" :
-                            liveLoan.status == .sent ? "Cancel Request" : "Forgive Loan",
-                            systemImage: "trash"
-                        )
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -107,6 +124,15 @@ struct LoanDetailView: View {
                     Task {
                         try? await loanManager.fetchLoans()
                         self.payments = try await loanManager.fetchPayments(for: liveLoan)
+                    }
+                }
+        }
+        .sheet(item: $selectedPayment) { payment in
+            TransactionDetailView(payment: payment, loan: liveLoan, isLender: isLender)
+                .onDisappear {
+                    Task {
+                        self.payments = try await loanManager.fetchPayments(for: liveLoan)
+                        try? await loanManager.fetchLoans() // Refresh balance
                     }
                 }
         }
@@ -186,23 +212,29 @@ struct LoanDetailView: View {
             }
             .presentationDetents([.medium, .large])
         }
+        .sheet(isPresented: $showReleaseSheet) {
+            NavigationStack {
+                ScrollView {
+                    Text(AgreementGenerator.generateRelease(for: liveLoan))
+                        .padding()
+                }
+                .navigationTitle("Release Document")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { showReleaseSheet = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showFundingSheet) {
+            FundingSheet(loan: liveLoan, isPresented: $showFundingSheet)
+        }
         // Alerts...
         .alert("Error", isPresented: $showError) {
             Button("OK", role: .cancel) { }
         } message: { Text(errorMsg ?? "Unknown error") }
-            .alert("Mark as Paid Off?", isPresented: $showPaidOffAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Confirm Paid", role: .none) {
-                    Task {
-                        do {
-                            try await loanManager.updateLoanStatus(liveLoan, status: .completed)
-                        } catch {
-                            errorMsg = error.localizedDescription
-                            showError = true
-                        }
-                    }
-                }
-            } message: { Text("This will mark the loan as fully repaid.") }
+
             .alert("Forgive Loan?", isPresented: $showForgiveAlert) {
                 Button("Cancel", role: .cancel) { }
                 Button("Forgive", role: .destructive) {
@@ -227,99 +259,177 @@ struct LoanDetailView: View {
                     }
                 }
             } message: { Text("This will cancel the loan and stop the signature process.") }
-            .alert("Verify Payment", isPresented: $showVerifyPaymentAlert, presenting: pendingPaymentToVerify) { payment in
-                Button("Reject", role: .destructive) {
-                    Task {
-                        try? await loanManager.updatePaymentStatus(payment: payment, newStatus: .rejected, loan: liveLoan)
-                        payments = try await loanManager.fetchPayments(for: liveLoan)
-                    }
-                }
-                Button("Confirm Received", role: .none) {
-                    Task {
-                        try? await loanManager.updatePaymentStatus(payment: payment, newStatus: .approved, loan: liveLoan)
-                        payments = try await loanManager.fetchPayments(for: liveLoan)
-                    }
-                }
-            } message: { payment in
-                Text("Did you receive \(payment.amount.formatted(.currency(code: "USD")))?")
-            }
+
+            // Verify Payment alert removed (moved to TransactionDetailView)
     }
     
     // MARK: - Components
     
-    var headerCard: some View {
-        VStack(spacing: 8) {
-            Text(liveLoan.status.title.uppercased())
-                .font(.caption)
-                .fontWeight(.bold)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
-                .background(Color.lsPrimary.opacity(0.1))
-                .foregroundStyle(Color.lsPrimary)
-                .cornerRadius(20)
-            
-            Text((liveLoan.remaining_balance ?? liveLoan.principal_amount).formatted(.currency(code: "USD")))
-                .font(.system(size: 40, weight: .bold))
-                .foregroundStyle(Color.primary)
-            
-            Text("Remaining Balance")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 32)
-        .background(Color.white)
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
-    }
+
     
     @ViewBuilder
     var actionSection: some View {
         VStack(spacing: 12) {
-            if liveLoan.status == .draft {
-                if isLender && liveLoan.lender_signed_at == nil {
-                    signButton
-                } else {
-                    Text("Waiting for signatures...")
-                        .foregroundStyle(.secondary)
-                }
-            } else if liveLoan.status == .sent {
-                if !isLender {
-                    signButton
-                } else {
-                    Text("Waiting for borrower to sign...")
-                        .foregroundStyle(.secondary)
-                }
-            } else if liveLoan.status == .active {
-                if isLender {
-                    Button {
-                        showPaidOffAlert = true
-                    } label: {
-                        Text("Mark Fully Paid Off")
-                            .bold()
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.lsPrimary)
-                            .foregroundStyle(.white)
-                            .cornerRadius(12)
-                    }
-                } else {
-                    Button {
-                        showPaymentSheet = true
-                    } label: {
-                        Text("Record Payment")
-                            .bold()
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.lsPrimary)
-                            .foregroundStyle(.white)
-                            .cornerRadius(12)
-                    }
-                }
+            switch liveLoan.status {
+            case .draft:
+                draftActions
+            case .sent:
+                sentActions
+            case .approved:
+                approvedActions
+            case .funding_sent:
+                fundingSentActions
+            case .active:
+                activeActions
+            case .completed, .forgiven:
+                completedActions
+            case .cancelled:
+                EmptyView()
             }
         }
     }
     
+    // MARK: - Sub-Action Views
+    
+    @ViewBuilder
+    var draftActions: some View {
+        if isLender && liveLoan.lender_signed_at == nil {
+            Button {
+                showAgreementSheet = true
+            } label: {
+                Text("Review & Sign Agreement")
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.lsPrimary)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            }
+        } else {
+            Text("Waiting for signatures...")
+                .foregroundStyle(.secondary)
+        }
+    }
+    
+    @ViewBuilder
+    var sentActions: some View {
+        if !isLender && liveLoan.borrower_signed_at == nil {
+            Button {
+                showAgreementSheet = true
+            } label: {
+                Text("Review & Accept Loan")
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.lsPrimary)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            }
+        } else {
+            Text("Waiting for borrower to sign...")
+                .foregroundStyle(.secondary)
+        }
+    }
+    
+    @ViewBuilder
+    var approvedActions: some View {
+        if isLender {
+            Button {
+                showFundingSheet = true
+            } label: {
+                HStack {
+                    Image(systemName: "paperplane.fill")
+                    Text("I Have Sent the Money")
+                }
+                .bold()
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.green)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+        } else {
+            HStack {
+                Image(systemName: "hourglass")
+                Text("Waiting for Lender to Release Funds")
+            }
+            .font(.headline)
+            .foregroundStyle(.secondary)
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.gray.opacity(0.1))
+            .cornerRadius(12)
+        }
+    }
+    
+    @ViewBuilder
+    var fundingSentActions: some View {
+        if isLender {
+            HStack {
+                Image(systemName: "clock")
+                Text("Waiting for borrower to confirm receipt...")
+            }
+            .font(.headline)
+            .foregroundStyle(.secondary)
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.gray.opacity(0.1))
+            .cornerRadius(12)
+        } else {
+            Button {
+                Task {
+                    try? await loanManager.confirmReceipt(loan: liveLoan)
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "checkmark.seal.fill")
+                    Text("Confirm I Received Money")
+                }
+                .bold()
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.green)
+                .foregroundColor(.white)
+                .cornerRadius(12)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    var activeActions: some View {
+        if !isLender {
+            Button {
+                showPaymentSheet = true
+            } label: {
+                Text("Record Payment")
+                    .bold()
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.lsPrimary)
+                    .foregroundStyle(.white)
+                    .cornerRadius(12)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    var completedActions: some View {
+        Button {
+            showReleaseSheet = true
+        } label: {
+            HStack {
+                Image(systemName: "checkmark.seal")
+                Text("View Release Document")
+            }
+            .bold()
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Color.gray.opacity(0.1))
+            .foregroundColor(.primary)
+            .cornerRadius(12)
+        }
+    }
+
     @ViewBuilder
     var historySection: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -342,91 +452,9 @@ struct LoanDetailView: View {
                                 .stroke(Color.gray.opacity(0.1), lineWidth: 1)
                         )
                         .onTapGesture {
-                            if isLender && payment.status == .pending {
-                                pendingPaymentToVerify = payment
-                                showVerifyPaymentAlert = true
-                            }
+                            selectedPayment = payment
                         }
                 }
-            }
-        }
-    }
-    
-    @ViewBuilder
-    var signButton: some View {
-        // 1. DRAFT: Lender needs to Review & Sign
-        if liveLoan.status == .draft && liveLoan.lender_signed_at == nil {
-            Button {
-                showAgreementSheet = true
-            } label: {
-                Text("Review & Sign Agreement")
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.lsPrimary)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-            }
-        }
-        // 2. SENT: Borrower needs to Accept
-        else if liveLoan.status == .sent && !isLender && liveLoan.borrower_signed_at == nil {
-            Button {
-                showAgreementSheet = true
-            } label: {
-                Text("Review & Accept Loan")
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.lsPrimary)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-            }
-        }
-        // 3. APPROVED: Lender needs to Confirm Funds
-        else if liveLoan.status == .approved {
-            if isLender {
-                Button {
-                    Task {
-                        try? await loanManager.confirmFunding(loan: liveLoan)
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: "paperplane.fill")
-                        Text("I Have Sent the Money")
-                    }
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.green) // Distinct Green
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-                }
-            } else {
-                // Borrower View
-                HStack {
-                    Image(systemName: "hourglass")
-                    Text("Waiting for Lender to Release Funds")
-                }
-                .font(.headline)
-                .foregroundStyle(.secondary)
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
-            }
-        }
-        // 4. ACTIVE: Pay Button (Borrower only)
-        else if liveLoan.status == .active && !isLender {
-            Button {
-                showPaymentSheet = true
-            } label: {
-                 Text("Record Payment")
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.lsPrimary)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
             }
         }
     }

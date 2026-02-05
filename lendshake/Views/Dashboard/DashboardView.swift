@@ -9,9 +9,11 @@ import SwiftUI
 
 struct DashboardView: View {
     @Environment(LoanManager.self) var loanManager
+    @State private var showCreateSheet: Bool = false
+    @State private var path = NavigationPath()
     
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack {
                 Color.lsBackground.ignoresSafeArea()
                 
@@ -22,7 +24,9 @@ struct DashboardView: View {
                     
                     
                     ToolbarItem(placement: .primaryAction) {
-                        NavigationLink(destination: LoanConstructionView()) {
+                        Button {
+                            showCreateSheet = true
+                        } label: {
                             Image(systemName: "plus")
                                 .font(.headline)
                                 .foregroundStyle(Color.lsPrimary)
@@ -46,6 +50,20 @@ struct DashboardView: View {
                     } catch {
                         print("Dashboard Refresh Error: \(error)")
                     }
+                }
+            }
+            .navigationDestination(for: Loan.self) { loan in
+                LoanDetailView(loan: loan)
+            }
+            .sheet(isPresented: $showCreateSheet) {
+                NavigationStack {
+                    LoanConstructionView(onLoanCreated: { newLoan in
+                        showCreateSheet = false
+                        // Small delay to allow sheet to dismiss before pushing
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            path.append(newLoan)
+                        }
+                    })
                 }
             }
         }

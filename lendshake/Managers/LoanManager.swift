@@ -9,131 +9,7 @@ import SwiftUI
 import Observation
 import Supabase
 
-enum LoanStatus: String, Codable, CaseIterable, Identifiable, Hashable {
-    case draft = "draft"
-    case sent = "sent"
-    case approved = "approved" // Borrower signed, waiting for funds
-    case active = "active"
-    case completed = "completed"
-    case forgiven = "forgiven"
-    case cancelled = "cancelled"
-    
-    var id: String { self.rawValue }
-    
-    var title: String {
-        switch self {
-        case .draft: return "Draft"
-        case .sent: return "Pending"
-        case .approved: return "Signed" // or "Funding Needed"
-        case .active: return "Active"
-        case .completed: return "Paid Off"
-        case .forgiven: return "Forgiven"
-        case .cancelled: return "Cancelled"
-        }
-    }
-}
 
-enum PaymentStatus: String, Codable, CaseIterable, Identifiable {
-    case pending = "pending"
-    case approved = "approved"
-    case rejected = "rejected"
-    
-    var id: String { self.rawValue }
-    
-    var title: String {
-        switch self {
-        case .pending: return "Pending Review"
-        case .approved: return "Approved"
-        case .rejected: return "Rejected"
-        }
-    }
-}
-
-enum PaymentType: String, Codable, CaseIterable, Identifiable {
-    case repayment = "repayment"
-    case funding = "funding"
-    
-    var id: String { self.rawValue }
-}
-
-struct Payment: Codable, Identifiable, Hashable {
-    var id: UUID?
-    let loan_id: UUID
-    let amount: Double
-    let date: Date
-    var status: PaymentStatus
-    var type: PaymentType // 'repayment' or 'funding'
-    let created_at: Date?
-    let proof_url: String?
-    
-    init(loanId: UUID, amount: Double, date: Date, type: PaymentType = .repayment, proofURL: String? = nil) {
-        self.id = nil
-        self.loan_id = loanId
-        self.amount = amount
-        self.date = date
-        self.status = .pending
-        self.type = type
-        self.proof_url = proofURL
-        self.created_at = nil
-    }
-}
-
-struct Loan: Codable, Identifiable, Hashable {
-    var id: UUID?
-    let lender_id: UUID
-    var borrower_id: UUID? // Optional: Links to auth.users once known/claimed
-    let principal_amount: Double
-    let interest_rate: Double
-    let repayment_schedule: String
-    let late_fee_policy: String
-    let maturity_date: Date
-    let borrower_name: String?
-    let borrower_email: String?
-    let borrower_phone: String?
-    var status: LoanStatus
-    var remaining_balance: Double?
-    let created_at: Date?
-    
-    // Agreement Fields
-    var agreement_text: String?
-    var lender_signed_at: Date?
-    var borrower_signed_at: Date?
-    var lender_ip: String?
-    var borrower_ip: String?
-    
-    // Helper to initialize for creation
-    init(
-        lenderId: UUID,
-        principal: Double,
-        interest: Double,
-        schedule: String,
-        lateFee: String,
-        maturity: Date,
-        borrowerName: String?,
-        borrowerEmail: String?,
-        borrowerPhone: String?
-    ) {
-        self.id = nil // Supabase will generate
-        self.lender_id = lenderId
-        self.borrower_id = nil // Initially nil
-        self.principal_amount = principal
-        self.interest_rate = interest
-        self.repayment_schedule = schedule
-        self.late_fee_policy = lateFee
-        self.maturity_date = maturity
-        self.borrower_name = borrowerName
-        self.borrower_email = borrowerEmail
-        self.borrower_phone = borrowerPhone
-        self.status = .draft
-        self.remaining_balance = principal // Initial balance = principal
-        self.created_at = nil
-        self.agreement_text = nil
-        self.lender_signed_at = nil
-        self.borrower_signed_at = nil
-        self.lender_ip = nil
-        self.borrower_ip = nil
-    }
-}
 
 @MainActor
 @Observable
@@ -306,18 +182,39 @@ class LoanManager {
         
         struct StatusUpdate: Encodable {
             let status: LoanStatus
+            let remaining_balance: Double?
         }
         
-        try await supabase
-            .from("loans")
-            .update(StatusUpdate(status: status))
-            .eq("id", value: id)
-            .execute()
+        // If forgiving, set balance to 0. Otherwise keep existing (nil in update struct means ignore/don't change? No, Encodable sends null. We need optional encode).
+        // Actually, Supabase update partial: Only fields present in JSON are updated.
+        // Swift Encodable sends nil as null or omits? Standard JSONEncoder handling.
+        // Let's explicitly separate the structs or logic given we want to change balance only sometimes.
+        
+        if status == .forgiven {
+            struct ForgiveUpdate: Encodable {
+                let status: LoanStatus
+                let remaining_balance: Double
+            }
+            try await supabase
+                .from("loans")
+                .update(ForgiveUpdate(status: status, remaining_balance: 0))
+                .eq("id", value: id)
+                .execute()
+        } else {
+            struct SimpleUpdate: Encodable {
+                let status: LoanStatus
+            }
+            try await supabase
+                .from("loans")
+                .update(SimpleUpdate(status: status))
+                .eq("id", value: id)
+                .execute()
+        }
         
         try await fetchLoans()
     }
     
-    func confirmFunding(loan: Loan) async throws {
+    func confirmFunding(loan: Loan, proofURL: String?) async throws {
         guard loan.status == .approved else { return }
         guard let loanId = loan.id else { return }
         
@@ -326,7 +223,8 @@ class LoanManager {
             loanId: loanId,
             amount: loan.principal_amount,
             date: Date(),
-            type: .funding
+            type: .funding,
+            proofURL: proofURL
         )
         fundingPayment.status = .approved
         
@@ -335,7 +233,13 @@ class LoanManager {
             .insert(fundingPayment)
             .execute()
         
-        // 2. Set Status to Active
+        // 2. Set Status to Funding Sent (Waiting for borrower confirmation)
+        try await updateLoanStatus(loan, status: .funding_sent)
+    }
+    
+    func confirmReceipt(loan: Loan) async throws {
+        guard loan.status == .funding_sent else { return }
+        // Borrower confirms receipt -> ACTIVE
         try await updateLoanStatus(loan, status: .active)
     }
     

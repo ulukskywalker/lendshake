@@ -12,11 +12,13 @@ struct LoanConstructionView: View {
     @Environment(AuthManager.self) var authManager
     @Environment(\.dismiss) var dismiss
     
+    var onLoanCreated: ((Loan) -> Void)?
+    
     // MARK: - Integration State
     @State private var createdLoan: Loan?
     @State private var errorMessage: String?
     @State private var showContactPicker: Bool = false
-    @State private var navigateToDetail: Bool = false
+
     
     // MARK: - Wizard State
     enum WizardStep: Int, CaseIterable {
@@ -103,11 +105,7 @@ struct LoanConstructionView: View {
                 selectedPhone: $borrowerPhone
             )
         }
-        .navigationDestination(isPresented: $navigateToDetail) {
-            if let loan = createdLoan {
-                LoanDetailView(loan: loan)
-            }
-        }
+        // Error Toast Overlay
         // Error Toast Overlay
         .overlay(alignment: .top) {
             if let error = errorMessage {
@@ -167,7 +165,7 @@ struct LoanConstructionView: View {
             Button {
                 handleNext()
             } label: {
-                Text(currentStep == .review ? "Create Draft" : "Next")
+                Text(currentStep == .review ? (createdLoan != nil ? "View Draft" : "Create Draft") : "Next")
                     .font(.headline)
                     .bold()
                     .foregroundColor(.white)
@@ -531,6 +529,12 @@ struct LoanConstructionView: View {
     }
     
     private func createLoan() async {
+        // Prevent duplicate creation
+        if let existing = createdLoan {
+            dismiss()
+            return
+        }
+        
         guard let principal = Double(principalAmount) else { return }
         let interest = isFamilyRate ? 0.0 : (Double(interestRate) ?? 0.0)
         let fullName = "\(borrowerFirstName) \(borrowerLastName)".trimmingCharacters(in: .whitespaces)
@@ -549,7 +553,8 @@ struct LoanConstructionView: View {
             
             // Success
             createdLoan = newLoan
-            navigateToDetail = true
+            onLoanCreated?(newLoan)
+            dismiss()
             
         } catch {
             errorMessage = "Failed to create: \(error.localizedDescription)"
