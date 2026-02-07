@@ -15,26 +15,30 @@ struct LoanListView: View {
     @State private var showDeleteAlert: Bool = false
     
     // Filtered Lists
+    var visibleLoans: [Loan] {
+        loanManager.loans
+    }
+
     var lendingLoans: [Loan] {
-        loanManager.loans.filter {
+        visibleLoans.filter {
             loanManager.isLender(of: $0) &&
             ($0.status == .active || $0.status == .sent || $0.status == .approved || $0.status == .funding_sent)
         }
     }
     
     var borrowingLoans: [Loan] {
-        loanManager.loans.filter {
+        visibleLoans.filter {
             !loanManager.isLender(of: $0) &&
             ($0.status == .active || $0.status == .sent || $0.status == .approved || $0.status == .funding_sent)
         }
     }
     
     var draftLoans: [Loan] {
-        loanManager.loans.filter { $0.status == .draft }
+        visibleLoans.filter { $0.status == .draft }
     }
     
     var historyLoans: [Loan] {
-        loanManager.loans.filter { $0.status == .completed || $0.status == .forgiven || $0.status == .cancelled }
+        visibleLoans.filter { $0.status == .completed || $0.status == .forgiven || $0.status == .cancelled }
     }
     
     var body: some View {
@@ -193,7 +197,7 @@ struct LoanCardView: View {
             // 1. Leading Role Icon (Initials - Contacts Style)
             ZStack {
                 Circle()
-                    .fill(Color(white: 0.9)) // Standard light gray background for initials
+                    .fill(Color(uiColor: .systemGray5))
                     .frame(width: 40, height: 40)
                 
                 Text(initials)
@@ -211,9 +215,15 @@ struct LoanCardView: View {
                     .lineLimit(1)
                 
                 HStack(spacing: 6) {
-                    // Status Text (No Pill)
                     Text(loan.status.title)
                         .font(.caption)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill((loan.status == .active ? themeColor : Color.secondary).opacity(0.12))
+                        )
                         .foregroundStyle(loan.status == .active ? themeColor : .secondary)
                     
                     if loan.status == .draft {
@@ -243,6 +253,10 @@ struct LoanCardView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4) // Reduced padding for standard list feel
         .contentShape(Rectangle())

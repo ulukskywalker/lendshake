@@ -17,7 +17,7 @@ struct ContentView: View {
             
             SettingsView()
                 .tabItem {
-                    Label("Profile", systemImage: "person.crop.circle.fill")
+                    Label("Settings", systemImage: "gearshape.fill")
                 }
         }
         .tint(.lsPrimary)

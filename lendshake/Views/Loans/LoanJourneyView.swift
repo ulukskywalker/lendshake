@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct LoanJourneyView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let status: LoanStatus
     let isLender: Bool
     
@@ -51,9 +53,9 @@ struct LoanJourneyView: View {
             .padding(.horizontal)
         }
         .padding(.vertical, 16)
-        .background(Color.white)
+        .background(Color.lsCardBackground)
         .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
+        .shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.05), radius: 5, x: 0, y: 2)
     }
     
     @ViewBuilder
@@ -70,7 +72,7 @@ struct LoanJourneyView: View {
                         .foregroundStyle(.white)
                 } else if step == currentStep {
                     Circle()
-                        .fill(.white)
+                        .fill(Color(uiColor: .systemBackground))
                         .frame(width: 6, height: 6)
                 }
             }

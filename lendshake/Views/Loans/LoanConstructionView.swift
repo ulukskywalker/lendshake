@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct LoanConstructionView: View {
     @Environment(LoanManager.self) var loanManager
@@ -18,6 +21,7 @@ struct LoanConstructionView: View {
     @State private var createdLoan: Loan?
     @State private var errorMessage: String?
     @State private var showContactPicker: Bool = false
+    @State private var showDatePickerPopover: Bool = false
 
     
     // MARK: - Wizard State
@@ -38,12 +42,12 @@ struct LoanConstructionView: View {
     }
     
     @State private var currentStep: WizardStep = .amount
+    @FocusState private var isPrincipalFieldFocused: Bool
     
     // MARK: - Data State
     @State private var principalAmount: String = ""
-    @State private var isFamilyRate: Bool = true
-    @State private var interestRate: String = ""
-    @State private var interestType: LoanInterestType = .percentage
+    @State private var interestRate: String = "0.0"
+    @State private var interestSliderValue: Double = 0.0
     @State private var repaymentSchedule: RepaymentSchedule = .monthly
     @State private var maturityDate: Date = Date().addingTimeInterval(86400 * 30 * 6) // Default 6 months
     @State private var borrowerFirstName: String = ""
@@ -51,8 +55,8 @@ struct LoanConstructionView: View {
     @State private var borrowerEmail: String = ""
     @State private var borrowerPhone: String = ""
     
-    // Default Late Fee
     @State private var lateFeePolicy: String = "0"
+    @State private var lateFeeSliderValue: Double = 0
 
     enum RepaymentSchedule: String, CaseIterable, Identifiable {
         case monthly = "Monthly"
@@ -93,21 +97,30 @@ struct LoanConstructionView: View {
         .navigationTitle(currentStep.title)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true) // Custom nav
+        .interactiveDismissDisabled(true)
+        .onAppear {
+            DispatchQueue.main.async {
+                isPrincipalFieldFocused = (currentStep == .amount)
+            }
+        }
+        .onChange(of: currentStep) { _, newStep in
+            isPrincipalFieldFocused = (newStep == .amount)
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
             }
         }
-        .sheet(isPresented: $showContactPicker) {
+        .background {
             ContactPicker(
+                isPresented: $showContactPicker,
                 firstName: $borrowerFirstName,
                 lastName: $borrowerLastName,
                 selectedEmail: $borrowerEmail,
                 selectedPhone: $borrowerPhone
             )
+            .frame(width: 0, height: 0)
         }
-        // Error Toast Overlay
-        // Error Toast Overlay
         .overlay(alignment: .top) {
             if let error = errorMessage {
                 Text(error)
@@ -183,7 +196,7 @@ struct LoanConstructionView: View {
             Spacer().frame(width: 50)
         }
         .padding()
-        .background(Color.white.ignoresSafeArea(edges: .bottom))
+        .background(Color.lsCardBackground.ignoresSafeArea(edges: .bottom))
     }
     
     // MARK: - Step 1: Amount
@@ -196,43 +209,32 @@ struct LoanConstructionView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
             
-            // Huge Input
-            TextField("0", text: $principalAmount)
-                .font(.system(size: 80, weight: .bold, design: .rounded))
-                .multilineTextAlignment(.center)
-                .keyboardType(.decimalPad)
-                .overlay(
-                    Text("$")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .offset(x: -120, y: -10) // Rough positioning
-                        .opacity(principalAmount.isEmpty ? 0 : 1)
-                , alignment: .center)
-            
-            // Rate Toggle
-            VStack {
-                Toggle("Family & Friends Rate (0%)", isOn: $isFamilyRate)
-                    .padding()
-                    .background(Color.white)
-                    .cornerRadius(12)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("$")
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .minimumScaleFactor(0.6)
                 
-                if !isFamilyRate {
-                    HStack {
-                        Text("Interest Rate")
-                        Spacer()
-                        TextField("Example: 5.0", text: $interestRate)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 100)
-                        Text("%")
+                TextField("0", text: $principalAmount)
+                    .font(.system(size: 72, weight: .bold, design: .rounded))
+                    .keyboardType(.decimalPad)
+                    .focused($isPrincipalFieldFocused)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .frame(minWidth: 80, maxWidth: 220)
+                    .onChange(of: principalAmount) { _, newValue in
+                        principalAmount = sanitizeCurrencyInput(newValue)
                     }
-                    .padding()
-                    .background(Color.white)
-                    .cornerRadius(12)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
             }
-            .padding(.horizontal)
-            .animation(.spring, value: isFamilyRate)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: 320)
+            
+            // Reverted to Text Input Only per user request
+            Spacer()
+            
+            
+            Spacer()
             
             Spacer()
         }
@@ -247,44 +249,6 @@ struct LoanConstructionView: View {
                     .font(.title2)
                     .bold()
                     .padding(.top)
-                
-                // Interest Section
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Interest")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                    
-                    VStack {
-                        // Type Selector
-                        Picker("Interest Type", selection: $interestType) {
-                            ForEach(LoanInterestType.allCases) { type in
-                                Text(type.title).tag(type)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.bottom, 8)
-                        
-                        // Input Field
-                        HStack {
-                            Text(interestType == .percentage ? "%" : "$")
-                                .font(.title2)
-                                .bold()
-                                .foregroundStyle(Color.lsPrimary)
-                            
-                            TextField("0", text: $interestRate)
-                                .keyboardType(.decimalPad)
-                                .font(.system(size: 32, weight: .bold, design: .rounded))
-                                .multilineTextAlignment(.leading)
-                        }
-                    }
-                    .padding()
-                    .background(Color.white)
-                    .cornerRadius(12)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.gray.opacity(0.1), lineWidth: 1)
-                    )
-                }
                 
                 // Frequency Chips
                 VStack(alignment: .leading, spacing: 8) {
@@ -303,7 +267,7 @@ struct LoanConstructionView: View {
                                     .bold()
                                     .padding(.vertical, 12)
                                     .frame(maxWidth: .infinity)
-                                    .background(repaymentSchedule == schedule ? Color.lsPrimary : Color.white)
+                                    .background(repaymentSchedule == schedule ? Color.lsPrimary : Color.lsCardBackground)
                                     .foregroundStyle(repaymentSchedule == schedule ? .white : .primary)
                                     .cornerRadius(12)
                                     .overlay(
@@ -313,38 +277,128 @@ struct LoanConstructionView: View {
                             }
                         }
                     }
+                    .onChange(of: repaymentSchedule) { _, _ in
+                        withAnimation {
+                            interestRate = "0.0"
+                            interestSliderValue = 0
+                        }
+                    }
                 }
                 .padding(.horizontal)
+
+                // Interest Section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Interest Rate")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        ZStack(alignment: .trailing) {
+                            Text("Family & Friends Rate")
+                                .font(.subheadline)
+                                .bold()
+                                .foregroundStyle(Color.green)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.green.opacity(0.1))
+                                .clipShape(Capsule())
+                                .opacity(interestSliderValue == 0 ? 1 : 0)
+                                .allowsHitTesting(interestSliderValue == 0)
+                            
+                            HStack(spacing: 4) {
+                                TextField("Example: 5.0", text: $interestRate)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(width: 80)
+                                Text("%")
+                                    .font(.body)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .opacity(interestSliderValue == 0 ? 0 : 1)
+                            .allowsHitTesting(interestSliderValue != 0)
+                        }
+                        .frame(height: 32)
+                    }
+                    
+                    // Interest Slider
+                    VStack {
+                        Slider(value: $interestSliderValue, in: 0...15, step: 0.5)
+                            .tint(Color.lsPrimary)
+                            .onChange(of: interestSliderValue) { _, newValue in
+                                interestRate = String(format: "%.1f", newValue)
+                                triggerSelectionHaptic()
+                            }
+                        
+                        HStack {
+                            Text("0%")
+                            Spacer()
+                            Text("15%")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 4)
+                }
+                .padding()
+                .background(Color.lsCardBackground)
+                .cornerRadius(12)
+                .padding(.horizontal)
+                .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
+                
+
                 
                 // Date Row
                 HStack {
                     Text("Final Due Date")
                         .font(.body)
                     Spacer()
-                    DatePicker("Select Date", selection: $maturityDate, in: Date()..., displayedComponents: .date)
-                        .datePickerStyle(.compact)
-                        .labelsHidden()
+                    Button {
+                        showDatePickerPopover = true
+                    } label: {
+                        Text(maturityDate.formatted(date: .abbreviated, time: .omitted))
+                            .foregroundStyle(Color.lsPrimary)
+                            .bold()
+                    }
                 }
                 .padding()
-                .background(Color.white)
+                .background(Color.lsCardBackground)
                 .cornerRadius(12)
                 .padding(.horizontal)
                 .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
+                .popover(isPresented: $showDatePickerPopover, arrowEdge: .top) {
+                    DatePicker("Select Date", selection: $maturityDate, in: Date()..., displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .onChange(of: maturityDate) { _, _ in
+                            showDatePickerPopover = false
+                        }
+                        .padding()
+                        .frame(minWidth: 320)
+                }
                 
                 // Late Fee Row
-                HStack {
-                    Text("Late Fee Policy")
-                         .font(.body)
-                    Spacer()
-                    TextField("0", text: $lateFeePolicy)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 80)
-                    Text("$")
-                        .foregroundStyle(.secondary)
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("Late Fee Policy")
+                             .font(.body)
+                        Spacer()
+                        TextField("0", text: $lateFeePolicy)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                        Text("$")
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    // Late Fee Slider
+                    Slider(value: $lateFeeSliderValue, in: 0...50, step: 5)
+                        .tint(Color.lsPrimary)
+                        .onChange(of: lateFeeSliderValue) { _, newValue in
+                            lateFeePolicy = String(format: "%.0f", newValue)
+                            triggerSelectionHaptic()
+                        }
                 }
                 .padding()
-                .background(Color.white)
+                .background(Color.lsCardBackground)
                 .cornerRadius(12)
                 .padding(.horizontal)
                 .shadow(color: .black.opacity(0.03), radius: 2, x: 0, y: 1)
@@ -423,7 +477,7 @@ struct LoanConstructionView: View {
                         .foregroundStyle(Color.lsPrimary)
                         .shadow(color: Color.lsPrimary.opacity(0.3), radius: 8, x: 0, y: 4)
                     
-                    if isFamilyRate {
+                    if (Double(interestRate) ?? 0) == 0 {
                         Text("FAMILY RATE (0%)")
                             .font(.caption)
                             .fontWeight(.bold)
@@ -445,7 +499,7 @@ struct LoanConstructionView: View {
                 }
                 .padding(.vertical, 30)
                 .frame(maxWidth: .infinity)
-                .background(Color.white)
+                .background(Color.lsCardBackground)
                 
                 Divider()
                 
@@ -542,20 +596,15 @@ struct LoanConstructionView: View {
     func handleNext() {
         switch currentStep {
         case .amount:
-            guard let amount = Double(principalAmount), amount > 0 else {
-                errorMessage = "Enter a valid amount"
-                return
-            }
+            guard validateAmountStep() else { return }
             withAnimation { currentStep = .terms }
             
         case .terms:
+            guard validateTermsStep() else { return }
             withAnimation { currentStep = .borrower }
             
         case .borrower:
-            guard !borrowerFirstName.isEmpty, !borrowerLastName.isEmpty, !borrowerEmail.isEmpty else {
-                errorMessage = "Name and Email are required"
-                return
-            }
+            guard validateBorrowerStep() else { return }
             // Close keyboard
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             withAnimation { currentStep = .review }
@@ -569,20 +618,20 @@ struct LoanConstructionView: View {
     
     private func createLoan() async {
         // Prevent duplicate creation
-        if let existing = createdLoan {
+        if createdLoan != nil {
             dismiss()
             return
         }
         
+        guard validateAmountStep(), validateTermsStep(), validateBorrowerStep() else { return }
         guard let principal = Double(principalAmount) else { return }
-        let interest = isFamilyRate ? 0.0 : (Double(interestRate) ?? 0.0)
+        let interest = Double(interestRate) ?? 0.0
         let fullName = "\(borrowerFirstName) \(borrowerLastName)".trimmingCharacters(in: .whitespaces)
         
         do {
             let newLoan = try await loanManager.createDraftLoan(
                 principal: principal,
                 interest: interest,
-                interestType: interestType,
                 schedule: repaymentSchedule.rawValue,
                 lateFee: lateFeePolicy,
                 maturity: maturityDate,
@@ -599,6 +648,91 @@ struct LoanConstructionView: View {
         } catch {
             errorMessage = "Failed to create: \(error.localizedDescription)"
         }
+    }
+    
+    // MARK: - Helpers
+    private func validateAmountStep() -> Bool {
+        let cleaned = principalAmount.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let amount = Double(cleaned), amount > 0 else {
+            errorMessage = "Enter a principal amount greater than 0."
+            return false
+        }
+        guard amount <= 10000 else {
+            errorMessage = "Principal cannot be more than $1,0000."
+            return false
+        }
+        return true
+    }
+
+    private func validateTermsStep() -> Bool {
+        let cleanedInterest = interestRate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let rate = Double(cleanedInterest), rate >= 0 else {
+            errorMessage = "Interest rate must be 0 or higher."
+            return false
+        }
+
+        let cleanedLateFee = lateFeePolicy.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let lateFee = Double(cleanedLateFee), lateFee >= 0 else {
+            errorMessage = "Late fee must be 0 or higher."
+            return false
+        }
+
+        guard maturityDate >= Calendar.current.startOfDay(for: Date()) else {
+            errorMessage = "Final due date cannot be in the past."
+            return false
+        }
+
+        return true
+    }
+
+    private func validateBorrowerStep() -> Bool {
+        let first = borrowerFirstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let last = borrowerLastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let email = borrowerEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        guard !first.isEmpty, !last.isEmpty else {
+            errorMessage = "Borrower first and last name are required."
+            return false
+        }
+
+        let emailPattern = "^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
+        let emailIsValid = NSPredicate(format: "SELF MATCHES %@", emailPattern).evaluate(with: email)
+        guard emailIsValid else {
+            errorMessage = "Enter a valid borrower email."
+            return false
+        }
+
+        if !borrowerPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let digitCount = borrowerPhone.filter(\.isNumber).count
+            guard digitCount >= 10 else {
+                errorMessage = "Borrower phone must have at least 10 digits."
+                return false
+            }
+        }
+
+        borrowerFirstName = first
+        borrowerLastName = last
+        borrowerEmail = email
+        return true
+    }
+
+    private func triggerSelectionHaptic() {
+        #if os(iOS)
+        let generator = UISelectionFeedbackGenerator()
+        generator.selectionChanged()
+        #endif
+    }
+
+    private func sanitizeCurrencyInput(_ value: String) -> String {
+        let filtered = value.filter { $0.isNumber || $0 == "." }
+        let parts = filtered.split(separator: ".", omittingEmptySubsequences: false)
+        if parts.count <= 1 {
+            return filtered
+        }
+
+        let integerPart = String(parts[0])
+        let decimalPart = String(parts[1].prefix(2))
+        return "\(integerPart).\(decimalPart)"
     }
 }
 

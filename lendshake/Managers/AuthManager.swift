@@ -17,6 +17,9 @@ class AuthManager {
     var awaitingEmailConfirmation: Bool = false
     var isProfileComplete: Bool = false
     var currentUserProfile: UserProfile?
+    var currentUserEmail: String? {
+        supabase.auth.currentUser?.email
+    }
     
     // Simple User Profile struct for decoding
     struct UserProfile: Decodable {
@@ -24,6 +27,9 @@ class AuthManager {
         let last_name: String?
         let residence_state: String? // Added state
         let phone_number: String? // Added phone number
+        let updated_at: Date?
+        let reminder_enabled: Bool?
+        let next_reminder_at: Date?
         
         var fullName: String {
             [first_name, last_name].compactMap { $0 }.joined(separator: " ")
@@ -122,6 +128,31 @@ class AuthManager {
         
         self.isProfileComplete = true
         // Refresh local profile
+        try await checkProfile()
+    }
+
+    func updateReminderSettings(enabled: Bool, nextReminderAt: Date?) async throws {
+        guard let user = supabase.auth.currentUser else { return }
+
+        struct ReminderUpdate: Encodable {
+            let id: UUID
+            let reminder_enabled: Bool
+            let next_reminder_at: Date?
+            let updated_at: Date
+        }
+
+        let update = ReminderUpdate(
+            id: user.id,
+            reminder_enabled: enabled,
+            next_reminder_at: enabled ? nextReminderAt : nil,
+            updated_at: Date()
+        )
+
+        try await supabase
+            .from("profiles")
+            .upsert(update)
+            .execute()
+
         try await checkProfile()
     }
     

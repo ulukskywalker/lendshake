@@ -17,7 +17,7 @@ struct WelcomeView: View {
                     .font(.system(size: 80))
                     .foregroundStyle(.tint)
                 
-                Text("Lendshake")
+                Text("Lendscape")
                     .font(.largeTitle)
                     .fontWeight(.bold)
                 

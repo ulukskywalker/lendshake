@@ -36,14 +36,14 @@ enum LoanStatus: String, Codable, CaseIterable, Identifiable, Hashable {
 
 enum LoanInterestType: String, Codable, CaseIterable, Identifiable {
     case percentage = "percentage"
-    case fixed = "fixed"
+    case fixed = "fixed" // Legacy support for existing records
     
     var id: String { self.rawValue }
     
     var title: String {
         switch self {
         case .percentage: return "Percentage (%)"
-        case .fixed: return "Fixed Fee ($)"
+        case .fixed: return "Legacy Fixed Fee ($)"
         }
     }
 }
@@ -231,14 +231,22 @@ struct Loan: Codable, Identifiable, Hashable {
     // MARK: - Late Fee Logic
     
     var lateFeeAmount: Double? {
-        // Parse "$15 after 5 days" -> 15.0
-        // Simple regex or string search
-        let policy = late_fee_policy
-        // Try to find "$" followed by digits
-        if let range = policy.range(of: "\\$[0-9]+", options: .regularExpression) {
-            let stringVal = policy[range].dropFirst() // remove $
-            return Double(stringVal)
+        let policy = late_fee_policy.trimmingCharacters(in: .whitespacesAndNewlines)
+        if policy.isEmpty || policy.lowercased() == "none" { return nil }
+        
+        // Support plain numeric values from the slider ("15", "15.0")
+        if let direct = Double(policy), direct > 0 {
+            return direct
         }
+        
+        // Backward compatibility for descriptive strings like "$15 after 5 days"
+        if let range = policy.range(of: "\\$\\s*[0-9]+(?:\\.[0-9]+)?", options: .regularExpression) {
+            let raw = String(policy[range]).replacingOccurrences(of: "$", with: "").trimmingCharacters(in: .whitespaces)
+            if let amount = Double(raw), amount > 0 {
+                return amount
+            }
+        }
+        
         return nil
     }
     

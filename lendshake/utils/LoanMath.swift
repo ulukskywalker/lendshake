@@ -45,6 +45,19 @@ struct LoanMath {
                 guard let next = calendar.date(byAdding: .month, value: 1, to: checkDate) else { break }
                 checkDate = next
             }
+        } else if schedule.contains("bi") {
+            let startDate = loan.created_at ?? loan.maturity_date
+            var checkDate = startDate
+            
+            if let firstDue = calendar.date(byAdding: .day, value: 14, to: startDate) {
+                checkDate = firstDue
+            }
+            
+            while checkDate <= referenceDate {
+                deadlines.append(checkDate)
+                guard let next = calendar.date(byAdding: .day, value: 14, to: checkDate) else { break }
+                checkDate = next
+            }
         } else {
             // Lump Sum -> Single Deadline
             deadlines.append(loan.maturity_date)

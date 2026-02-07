@@ -21,6 +21,7 @@ struct LoanDetailView: View {
 
     @State private var showDeleteDraftAlert: Bool = false
     @State private var showCancelAlert: Bool = false
+    @State private var showRejectAlert: Bool = false
     
     @State private var showAgreementSheet: Bool = false
     @State private var showProofSheet: Bool = false
@@ -114,12 +115,19 @@ struct LoanDetailView: View {
         .onAppear {
             Task {
                 // 1. Run Auto-Check for Fees (Catch-Up)
-                try? await loanManager.checkAutoEvents(for: liveLoan)
+                do {
+                    try await loanManager.checkAutoEvents(for: liveLoan)
+                } catch {
+                    print("Loan auto-events error: \(error)")
+                }
                 
                 // 2. Refresh Payments
                 if let fetchedPayments = try? await loanManager.fetchPayments(for: liveLoan) {
                     self.payments = fetchedPayments
                 }
+                
+                // 3. Fetch Lender Name
+                await fetchLenderName()
             }
         }
         .sheet(isPresented: $showPaymentSheet) {
@@ -143,7 +151,7 @@ struct LoanDetailView: View {
         .sheet(isPresented: $showAgreementSheet) {
             NavigationStack {
                 ScrollView {
-                    Text(liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan))
+                    Text(liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan, lenderName: lenderName))
                         .padding()
                         .font(.system(.body, design: .monospaced))
                 }
@@ -153,7 +161,7 @@ struct LoanDetailView: View {
                         Button("Done") { showAgreementSheet = false }
                     }
                     ToolbarItem(placement: .topBarLeading) {
-                        ShareLink(item: liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan))
+                        ShareLink(item: liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan, lenderName: lenderName))
                     }
                     
                     // Show "Sign" button if the current user needs to sign
@@ -207,15 +215,7 @@ struct LoanDetailView: View {
                     }
                 }
                 .task {
-                    if isLender {
-                        lenderName = authManager.currentUserProfile?.fullName ?? "Me"
-                    } else {
-                        if let name = await authManager.fetchProfileName(for: liveLoan.lender_id) {
-                            lenderName = name
-                        } else {
-                            lenderName = "Unknown"
-                        }
-                    }
+                    await fetchLenderName()
                 }
             }
             .presentationDetents([.medium, .large])
@@ -267,6 +267,14 @@ struct LoanDetailView: View {
                     }
                 }
             } message: { Text("This will cancel the loan and stop the signature process.") }
+            .alert("Reject Agreement?", isPresented: $showRejectAlert) {
+                Button("Keep Reviewing", role: .cancel) { }
+                Button("Reject Loan", role: .destructive) {
+                    Task {
+                        try? await loanManager.updateLoanStatus(liveLoan, status: .cancelled)
+                    }
+                }
+            } message: { Text("This will reject the agreement and cancel this loan request.") }
 
             // Verify Payment alert removed (moved to TransactionDetailView)
     }
@@ -322,16 +330,47 @@ struct LoanDetailView: View {
     @ViewBuilder
     var sentActions: some View {
         if !isLender && liveLoan.borrower_signed_at == nil {
-            Button {
-                showAgreementSheet = true
-            } label: {
-                Text("Review & Accept Loan")
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.lsPrimary)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
+            VStack(spacing: 10) {
+                Button {
+                    showAgreementSheet = true
+                } label: {
+                    Text("Review & Accept Loan")
+                        .bold()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.lsPrimary)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                }
+
+                Button {
+                    showRejectAlert = true
+                } label: {
+                    Text("Reject Agreement")
+                        .bold()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.red.opacity(0.1))
+                        .foregroundColor(.red)
+                        .cornerRadius(12)
+                }
+            }
+        } else if isLender {
+            VStack(spacing: 10) {
+                Text("Waiting for borrower to sign...")
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    showCancelAlert = true
+                } label: {
+                    Text("Cancel Request")
+                        .bold()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.red.opacity(0.1))
+                        .foregroundColor(.red)
+                        .cornerRadius(12)
+                }
             }
         } else {
             Text("Waiting for borrower to sign...")
@@ -453,16 +492,22 @@ struct LoanDetailView: View {
                 ForEach(payments) { payment in
                     PaymentRow(payment: payment)
                         .padding()
-                        .background(Color.white)
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.gray.opacity(0.1), lineWidth: 1)
-                        )
+                        .lsCardContainer()
                         .onTapGesture {
                             selectedPayment = payment
                         }
                 }
+            }
+        }
+    }
+    private func fetchLenderName() async {
+        if isLender {
+            lenderName = authManager.currentUserProfile?.fullName ?? "Me"
+        } else {
+            if let name = await authManager.fetchProfileName(for: liveLoan.lender_id) {
+                lenderName = name
+            } else {
+                lenderName = "Unknown"
             }
         }
     }

@@ -33,7 +33,7 @@ struct DashboardView: View {
                         }
                     }
                 }
-                .navigationTitle("Lendshake")
+                .navigationTitle("Lendscape")
                 .toolbarBackground(.visible, for: .navigationBar)
                 .task {
                     if loanManager.loans.isEmpty {
@@ -55,7 +55,7 @@ struct DashboardView: View {
             .navigationDestination(for: Loan.self) { loan in
                 LoanDetailView(loan: loan)
             }
-            .sheet(isPresented: $showCreateSheet) {
+            .fullScreenCover(isPresented: $showCreateSheet) {
                 NavigationStack {
                     LoanConstructionView(onLoanCreated: { newLoan in
                         showCreateSheet = false

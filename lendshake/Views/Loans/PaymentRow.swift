@@ -11,7 +11,7 @@ struct PaymentRow: View {
     let payment: Payment
     
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             if payment.type == .funding {
                 // Formatting for the Funding Event
                 VStack(alignment: .leading) {
@@ -115,8 +115,13 @@ struct PaymentRow: View {
                         .cornerRadius(8)
                 }
             }
+            
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
     
     var statusColor: Color {
@@ -126,7 +131,4 @@ struct PaymentRow: View {
         case .rejected: return .red
         }
     }
-}
-extension URL: Identifiable {
-    public var id: String { absoluteString }
 }

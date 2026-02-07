@@ -9,215 +9,12 @@ import SwiftUI
 import Observation
 import Supabase
 
-extension LoanManager {
-    // MARK: - Auto-Events (Catch-Up Logic)
-    
-    func checkAutoEvents(for loan: Loan) async throws {
-        // Only active loans accrue fees
-        guard loan.status == .active else { return }
-        
-        // Check if Late Fee Policy exists
-        guard let feeAmount = loan.lateFeeAmount, feeAmount > 0 else { return }
-        
-        // Grace Period
-        let graceDays = loan.gracePeriodDays
-        
-        // Determine Deadlines
-        var deadlines: [Date] = []
-        let schedule = loan.repayment_schedule.lowercased()
-        let now = Date()
-        let calendar = Calendar.current
-        
-        if schedule.contains("month") {
-            // Monthly Schedule
-            // Start from creation/start date
-            let startDate = loan.created_at ?? loan.maturity_date // Fallback
-            // Loop dates until maturity or now
-            
-            // Safety: Limit loop
-            var checkDate = startDate
-            let dayComponent = calendar.component(.day, from: startDate)
-            
-            // Advance to first month anniversary
-            if let firstDue = calendar.date(byAdding: .month, value: 1, to: startDate) {
-                checkDate = firstDue
-            }
-            
-            while checkDate <= now {
-                deadlines.append(checkDate)
-                guard let next = calendar.date(byAdding: .month, value: 1, to: checkDate) else { break }
-                checkDate = next
-            }
-        } else {
-            // Lump Sum / Default
-            deadlines.append(loan.maturity_date)
-        }
-        
-        // Fetch existing fees
-        let existingPayments = try await fetchPayments(for: loan)
-        
-        // 1. Calculate Missing Late Fees
-        let missingFeesCount = LoanMath.calculateMissingLateFees(for: loan, existingPayments: existingPayments)
-        
-        var feesToAdd: [Payment] = []
-        var balanceIncrease: Double = 0
-        
-        if missingFeesCount > 0 {
-            print("DEBUG: Catch-Up found \(missingFeesCount) missing late fees.")
-            
-            for _ in 0..<missingFeesCount {
-                let newFee = Payment(
-                    loanId: loan.id!,
-                    amount: feeAmount,
-                    date: now, // Created now
-                    type: .lateFee
-                )
-                feesToAdd.append(newFee)
-                balanceIncrease += feeAmount
-            }
-        }
-        
-        // Execute Batch
-        if !feesToAdd.isEmpty {
-            for var fee in feesToAdd {
-                fee.status = .approved
-                try await supabase.from("payments").insert(fee).execute()
-            }
-            // Update Balance logic...
-            let currentBalance = loan.remaining_balance ?? loan.principal_amount
-            let newBalance = currentBalance + balanceIncrease
-            
-            // struct BalanceUpdate removed - using file-level helper
-            try await supabase.from("loans").update(BalanceUpdate(remaining_balance: newBalance, status: nil, release_document_text: nil)).eq("id", value: loan.id!).execute()
-            
-            try await fetchLoans()
-        }
-        
-        // 2. Check Interest
-        try await checkInterest(for: loan)
-    }
-    
-    private func checkInterest(for loan: Loan) async throws {
-        // Only active loans accrue interest
-        guard loan.status == .active else { return }
-        
-        // Handle Fixed vs Percentage
-        if loan.interest_type == .fixed {
-            // FIXED FEE LOGIC
-            // Ensure the one-time fee is applied
-            guard loan.interest_rate > 0 else { return } // Here rate is the amount
-            
-            let existingPayments = try await fetchPayments(for: loan)
-            let hasInterest = existingPayments.contains { $0.type == .interest }
-            
-            if !hasInterest {
-                // Apply the One-Time Fixed Fee
-                let feePayment = Payment(
-                    loanId: loan.id!,
-                    amount: loan.interest_rate, // stored as double
-                    date: loan.created_at ?? Date(),
-                    type: .interest
-                )
-                
-                var payment = feePayment
-                payment.status = .approved
-                try await supabase.from("payments").insert(payment).execute()
-                
-                // Update Balance
-                let currentBalance = loan.remaining_balance ?? loan.principal_amount
-                let newBalance = currentBalance + loan.interest_rate
-                
-                try await supabase
-                    .from("loans")
-                    .update(BalanceUpdate(remaining_balance: newBalance, status: nil, release_document_text: nil))
-                    .eq("id", value: loan.id!)
-                    .execute()
-                
-                try await fetchLoans()
-            }
-            
-        } else {
-            // PERCENTAGE LOGIC (Monthly)
-            guard loan.interest_rate > 0 else { return }
-            
-            let calendar = Calendar.current
-            let now = Date()
-            let start = loan.created_at ?? loan.maturity_date // Fallback
-            
-            // Interest accrues monthly on the anniversary of the creation date
-            // e.g. Created Jan 5 -> Interest on Feb 5, Mar 5...
-            
-            var interestDates: [Date] = []
-            var checkDate = start
-            
-            // Advance to first month
-            if let first = calendar.date(byAdding: .month, value: 1, to: start) {
-                checkDate = first
-            } else { return }
-            
-            while checkDate <= now {
-                interestDates.append(checkDate)
-                guard let next = calendar.date(byAdding: .month, value: 1, to: checkDate) else { break }
-                checkDate = next
-            }
-            
-            if interestDates.isEmpty { return }
-            
-            // Fetch existing Interest payments to avoid duplicates
-            let existingPayments = try await fetchPayments(for: loan)
-            
-            // Calculate Missing Interest
-            let (missingCount, monthlyAmount) = LoanMath.calculateMissingInterest(for: loan, existingPayments: existingPayments)
-            
-            var interestToAdd: [Payment] = []
-            var balanceIncrease: Double = 0
-            
-            if missingCount > 0 {
-                print("DEBUG: Catch-Up found \(missingCount) missing interest payments.")
-                
-                for _ in 0..<missingCount {
-                    let newInterest = Payment(
-                        loanId: loan.id!,
-                        amount: monthlyAmount,
-                        date: now, // Recorded NOW
-                        type: .interest
-                    )
-                    interestToAdd.append(newInterest)
-                    balanceIncrease += monthlyAmount
-                }
-            }
-            
-            // Batch Insert
-            if !interestToAdd.isEmpty {
-                for var payment in interestToAdd {
-                    payment.status = .approved
-                    try await supabase.from("payments").insert(payment).execute()
-                }
-                
-                // Update Balance
-                let currentBalance = loan.remaining_balance ?? loan.principal_amount
-                let newBalance = currentBalance + balanceIncrease
-                
-                try await supabase
-                    .from("loans")
-                    .update(BalanceUpdate(remaining_balance: newBalance, status: nil, release_document_text: nil))
-                    .eq("id", value: loan.id!)
-                    .execute()
-                
-                try await fetchLoans()
-            }
-        }
-    }
-}
-
-
-
-
 @MainActor
 @Observable
 class LoanManager {
     var loans: [Loan] = []
     var isLoading: Bool = false
+    private var realtimeChannel: RealtimeChannelV2?
     
     func fetchLoans() async throws {
         self.isLoading = true
@@ -241,6 +38,9 @@ class LoanManager {
             
             print("DEBUG: Fetched \(loans.count) loans for \(userEmail) (ID: \(user.id))")
             self.loans = loans
+            
+            // Subscribe to real-time updates
+            await subscribeToLoans()
         } catch {
             print("DEBUG: Fetch Loans Error: \(error)")
             // If table doesn't exist, this will print.
@@ -248,10 +48,87 @@ class LoanManager {
         }
     }
     
+    private func subscribeToLoans() async {
+        guard let user = supabase.auth.currentUser else { return }
+        
+        // Remove existing channel if any
+        if let existing = realtimeChannel {
+            await existing.unsubscribe()
+        }
+        
+        // Create new channel
+        let channel = supabase.realtimeV2.channel("public:loans")
+        
+        let changes = channel.postgresChange(
+            AnyAction.self,
+            schema: "public",
+            table: "loans"
+        )
+        
+        // Listen in a separate task so we don't block
+        Task {
+            for await change in changes {
+                await handleRealtimeChange(change, userId: user.id, userEmail: user.email ?? "")
+            }
+        }
+        
+        do {
+            try await channel.subscribeWithError()
+            self.realtimeChannel = channel
+        } catch {
+            print("ERROR: Exception during subscription: \(error)")
+        }
+    }
+    
+    private func handleRealtimeChange(_ change: AnyAction, userId: UUID, userEmail: String) async {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        switch change {
+        case .insert(let action):
+            guard let loan = try? action.decodeRecord(as: Loan.self, decoder: decoder) else { return }
+            if shouldInclude(loan, userId: userId, userEmail: userEmail) {
+                 withAnimation {
+                     self.loans.insert(loan, at: 0)
+                 }
+            }
+        case .update(let action):
+            guard let loan = try? action.decodeRecord(as: Loan.self, decoder: decoder) else { return }
+            if let index = self.loans.firstIndex(where: { $0.id == loan.id }) {
+                withAnimation {
+                    self.loans[index] = loan
+                }
+            } else if shouldInclude(loan, userId: userId, userEmail: userEmail) {
+                // It was updated effectively adding it to our list
+                 withAnimation {
+                     self.loans.insert(loan, at: 0)
+                     self.loans.sort(by: { ($0.created_at ?? Date()) > ($1.created_at ?? Date()) })
+                 }
+            }
+        case .delete(let action):
+            let oldRecord = action.oldRecord
+            guard let data = try? JSONEncoder().encode(oldRecord),
+                  let deleted = try? decoder.decode(DeletedRecord.self, from: data) else { return }
+            
+             withAnimation {
+                 self.loans.removeAll(where: { $0.id == deleted.id })
+             }
+        }
+    }
+    
+    struct DeletedRecord: Decodable {
+        let id: UUID
+    }
+    
+    private func shouldInclude(_ loan: Loan, userId: UUID, userEmail: String) -> Bool {
+        return loan.lender_id == userId ||
+               loan.borrower_id == userId ||
+               loan.borrower_email == userEmail
+    }
+    
     func createDraftLoan(
         principal: Double,
         interest: Double,
-        interestType: LoanInterestType = .percentage,
         schedule: String,
         lateFee: String,
         maturity: Date,
@@ -270,7 +147,6 @@ class LoanManager {
             lenderId: user.id,
             principal: principal,
             interest: interest,
-            interestType: interestType,
             schedule: schedule,
             lateFee: lateFee,
             maturity: maturity,
@@ -314,10 +190,9 @@ class LoanManager {
             var updatedLoan = loan
             updatedLoan.lender_signed_at = Date()
             
-            // Generate agreement if missing
-            if updatedLoan.agreement_text == nil {
-                updatedLoan.agreement_text = AgreementGenerator.generate(for: loan)
-            }
+            // Regenerate agreement at signing time to ensure names/terms are current.
+            let lenderName = await resolveLenderDisplayName(for: user)
+            updatedLoan.agreement_text = AgreementGenerator.generate(for: loan, lenderName: lenderName)
             
             struct LenderSignUpdate: Encodable {
                 let lender_signed_at: Date
@@ -341,7 +216,6 @@ class LoanManager {
             
         } else {
             // BORROWER SIGNING
-            // Status moves to ACTIVE once borrower signs
             struct BorrowerSignUpdate: Encodable {
                 let borrower_signed_at: Date
                 let borrower_ip: String?
@@ -383,16 +257,6 @@ class LoanManager {
     
     func updateLoanStatus(_ loan: Loan, status: LoanStatus) async throws {
         guard let id = loan.id else { return }
-        
-        struct StatusUpdate: Encodable {
-            let status: LoanStatus
-            let remaining_balance: Double?
-        }
-        
-        // If forgiving, set balance to 0. Otherwise keep existing (nil in update struct means ignore/don't change? No, Encodable sends null. We need optional encode).
-        // Actually, Supabase update partial: Only fields present in JSON are updated.
-        // Swift Encodable sends nil as null or omits? Standard JSONEncoder handling.
-        // Let's explicitly separate the structs or logic given we want to change balance only sometimes.
         
         if status == .forgiven {
             struct ForgiveUpdate: Encodable {
@@ -457,6 +321,45 @@ class LoanManager {
             return nil
         }
     }
+
+    private func fetchUserFullName(userId: UUID) async -> String? {
+        struct ProfileName: Decodable {
+            let first_name: String?
+            let last_name: String?
+        }
+
+        do {
+            let profile: ProfileName = try await supabase
+                .from("profiles")
+                .select("first_name, last_name")
+                .eq("id", value: userId)
+                .single()
+                .execute()
+                .value
+
+            let fullName = [profile.first_name, profile.last_name]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+
+            return fullName.isEmpty ? nil : fullName
+        } catch {
+            return nil
+        }
+    }
+
+    private func resolveLenderDisplayName(for user: User) async -> String {
+        if let profileName = await fetchUserFullName(userId: user.id),
+           !profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return profileName
+        }
+
+        if let email = user.email, let firstSegment = email.split(separator: "@").first, !firstSegment.isEmpty {
+            return String(firstSegment)
+        }
+
+        return "Lender"
+    }
     
     func isLender(of loan: Loan) -> Bool {
         guard let user = supabase.auth.currentUser else { return false }
@@ -517,37 +420,24 @@ class LoanManager {
             let currentBalance = loan.remaining_balance ?? loan.principal_amount
             let newBalance = max(0, currentBalance - payment.amount)
             
-            // struct BalanceUpdate removed - using file-level helper
-            
-            var nextDetails: BalanceUpdate
-            
             if newBalance <= 0 {
                 // Generate Release Document
                 let releaseDoc = AgreementGenerator.generateRelease(for: loan)
-                nextDetails = BalanceUpdate(remaining_balance: 0, status: .completed, release_document_text: releaseDoc)
+                try await supabase
+                    .from("loans")
+                    .update(BalanceUpdate(remaining_balance: 0, status: .completed, release_document_text: releaseDoc))
+                    .eq("id", value: loanId)
+                    .execute()
             } else {
-                nextDetails = BalanceUpdate(remaining_balance: newBalance, status: nil, release_document_text: nil)
+                try await supabase
+                    .from("loans")
+                    .update(BalanceOnlyUpdate(remaining_balance: newBalance))
+                    .eq("id", value: loanId)
+                    .execute()
             }
-            
-            try await supabase
-                .from("loans")
-                .update(nextDetails)
-                .eq("id", value: loanId)
-                .execute()
                 
             // Refresh loans to get new balance
             try await fetchLoans()
         }
     }
-}
-
-// Helper struct for update
-struct BalanceUpdate: Encodable {
-    let remaining_balance: Double
-    let status: LoanStatus?
-    let release_document_text: String?
-}
-
-enum AuthError: Error {
-    case notAuthenticated
 }

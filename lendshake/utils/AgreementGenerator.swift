@@ -8,25 +8,24 @@
 import Foundation
 
 struct AgreementGenerator {
-    static func generate(for loan: Loan) -> String {
+    static func generate(for loan: Loan, lenderName: String? = nil) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"
         
         let principalString = formatter.string(from: NSNumber(value: loan.principal_amount)) ?? "$\(loan.principal_amount)"
         let dateString = loan.maturity_date.formatted(date: .long, time: .omitted)
-        let lenderName = "Lender" // Ideally we fetch current user's name, but for MVP "Lender"
+        let trimmedLenderName = lenderName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedLenderName = (trimmedLenderName?.isEmpty == false ? trimmedLenderName : nil) ?? "Lender"
         let borrowerName = loan.borrower_name ?? "Borrower"
         
         let interest = loan.interest_rate
         let interestClause: String
         
         if interest == 0 {
-             interestClause = "This Note shall bear no interest."
-        } else if loan.interest_type == .fixed {
-             interestClause = "The Borrower shall pay a fixed interest fee of \(interest.formatted(.currency(code: "USD"))), which shall be added to the Principal amount."
+            interestClause = "This Note shall bear no interest."
         } else {
-             interestClause = "This Note bears interest at a rate of \(interest)% per annum."
+            interestClause = "This Note bears interest at a rate of \(interest)% per annum."
         }
         
         return """
@@ -35,7 +34,7 @@ struct AgreementGenerator {
         1. THE PARTIES
         This Promissory Note ("Note") is made between:
         
-        Lender: \(lenderName)
+        Lender: \(resolvedLenderName)
         Borrower: \(borrowerName)
         
         2. THE LOAN

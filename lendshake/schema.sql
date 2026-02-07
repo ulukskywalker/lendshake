@@ -7,8 +7,13 @@ create table if not exists public.profiles (
   last_name text,
   phone_number text,
   residence_state text,
+  reminder_enabled boolean default false,
+  next_reminder_at timestamptz,
   updated_at timestamptz
 );
+
+alter table public.profiles add column if not exists reminder_enabled boolean default false;
+alter table public.profiles add column if not exists next_reminder_at timestamptz;
 
 alter table public.profiles enable row level security;
 
