@@ -11,8 +11,8 @@ struct SettingsView: View {
     @Environment(AuthManager.self) var authManager
     @Environment(NotificationManager.self) var notificationManager
     
-    @State private var reminderEnabled = false
-    @State private var reminderError: String?
+    @State private var actionNotificationsEnabled = false
+    @State private var notificationError: String?
 
     var body: some View {
         NavigationStack {
@@ -26,15 +26,15 @@ struct SettingsView: View {
                 }
                 
                 Section("Notifications") {
-                    Toggle("Action Notifications", isOn: $reminderEnabled)
+                    Toggle("Action Notifications", isOn: $actionNotificationsEnabled)
 
                     LabeledContent("System Notifications", value: notificationStatusText)
                         .foregroundStyle(notificationManager.notificationsEnabledInSystem ? Color.secondary : Color.orange)
                 }
                 
-                if let reminderError {
+                if let notificationError {
                     Section {
-                        Text(reminderError)
+                        Text(notificationError)
                             .foregroundStyle(.red)
                             .font(.footnote)
                     }
@@ -53,32 +53,32 @@ struct SettingsView: View {
             .background(Color.lsBackground)
             .navigationTitle("Settings")
             .task {
-                loadReminderSettings()
+                loadNotificationSettings()
                 await notificationManager.refreshAuthorizationStatus()
             }
-            .onChange(of: reminderEnabled) { _, newValue in
+            .onChange(of: actionNotificationsEnabled) { _, newValue in
                 Task { await applyNotificationToggle(enabled: newValue) }
             }
         }
     }
     
-    private func loadReminderSettings() {
-        reminderEnabled = notificationManager.remindersEnabled
+    private func loadNotificationSettings() {
+        actionNotificationsEnabled = notificationManager.actionNotificationsEnabled
     }
     
     private func applyNotificationToggle(enabled: Bool) async {
-        reminderError = nil
+        notificationError = nil
         if enabled {
             let granted = await notificationManager.requestAuthorizationIfNeeded()
             guard granted else {
-                reminderError = "Notifications are disabled in iOS Settings."
-                reminderEnabled = false
-                notificationManager.applyReminderPreferences(enabled: false, reminderAt: nil)
+                notificationError = "Notifications are disabled in iOS Settings."
+                actionNotificationsEnabled = false
+                notificationManager.setActionNotificationsEnabled(false)
                 return
             }
         }
 
-        notificationManager.applyReminderPreferences(enabled: enabled, reminderAt: nil)
+        notificationManager.setActionNotificationsEnabled(enabled)
         if !enabled {
             await notificationManager.clearManagedNotifications()
         }

@@ -484,54 +484,26 @@ class LoanManager {
         guard let loanId = loan.id else { return }
         
         if isLender {
-            // LENDER SIGNING
-            var updatedLoan = loan
-            updatedLoan.lender_signed_at = Date()
-            
-            // Regenerate agreement at signing time to ensure names/terms are current.
-            let lenderName = await resolveLenderDisplayName(for: user)
-            updatedLoan.agreement_text = AgreementGenerator.generate(for: loan, lenderName: lenderName)
-            
-            struct LenderSignUpdate: Encodable {
-                let lender_signed_at: Date
-                let agreement_text: String
-                let lender_ip: String?
-                let status: LoanStatus
-            }
-            
-            let updateData = LenderSignUpdate(
-                lender_signed_at: Date(),
-                agreement_text: updatedLoan.agreement_text!,
-                lender_ip: ipAddress,
-                status: .sent
-            )
-            
-            try await supabase
-                .from("loans")
-                .update(updateData)
-                .eq("id", value: loanId)
+            let agreementText = AgreementGenerator.generate(for: loan)
+
+            let params: [String: String] = [
+                "p_loan_id": loanId.uuidString,
+                "p_agreement_text": agreementText,
+                "p_lender_ip": ipAddress ?? ""
+            ]
+
+            _ = try await supabase
+                .rpc("lender_sign_loan", params: params)
                 .execute()
             
         } else {
-            // BORROWER SIGNING
-            struct BorrowerSignUpdate: Encodable {
-                let borrower_signed_at: Date
-                let borrower_ip: String?
-                let status: LoanStatus
-                let borrower_id: UUID // CLAIM the loan
-            }
-            
-            let updateData = BorrowerSignUpdate(
-                borrower_signed_at: Date(),
-                borrower_ip: ipAddress,
-                status: .approved, // Move to approved (waiting for funds), not active yet
-                borrower_id: user.id
-            )
-            
-            try await supabase
-                .from("loans")
-                .update(updateData)
-                .eq("id", value: loanId)
+            let params: [String: String] = [
+                "p_loan_id": loanId.uuidString,
+                "p_borrower_ip": ipAddress ?? ""
+            ]
+
+            _ = try await supabase
+                .rpc("borrower_sign_loan", params: params)
                 .execute()
         }
         
@@ -553,30 +525,17 @@ class LoanManager {
         try await fetchLoans()
     }
     
-    func updateLoanStatus(_ loan: Loan, status: LoanStatus) async throws {
+    func transitionLoanStatus(_ loan: Loan, status: LoanStatus) async throws {
         guard let id = loan.id else { return }
-        
-        if status == .forgiven {
-            struct ForgiveUpdate: Encodable {
-                let status: LoanStatus
-                let remaining_balance: Double
-            }
-            try await supabase
-                .from("loans")
-                .update(ForgiveUpdate(status: status, remaining_balance: 0))
-                .eq("id", value: id)
-                .execute()
-        } else {
-            struct SimpleUpdate: Encodable {
-                let status: LoanStatus
-            }
-            try await supabase
-                .from("loans")
-                .update(SimpleUpdate(status: status))
-                .eq("id", value: id)
-                .execute()
-        }
-        
+
+        let params: [String: String] = [
+            "p_loan_id": id.uuidString,
+            "p_new_status": status.rawValue
+        ]
+        _ = try await supabase
+            .rpc("transition_loan_status", params: params)
+            .execute()
+
         try await fetchLoans()
     }
     
@@ -600,13 +559,30 @@ class LoanManager {
             .execute()
         
         // 2. Set Status to Funding Sent (Waiting for borrower confirmation)
-        try await updateLoanStatus(loan, status: .funding_sent)
+        try await transitionLoanStatus(loan, status: .funding_sent)
     }
     
     func confirmReceipt(loan: Loan) async throws {
         guard loan.status == .funding_sent else { return }
         // Borrower confirms receipt -> ACTIVE
-        try await updateLoanStatus(loan, status: .active)
+        try await transitionLoanStatus(loan, status: .active)
+    }
+
+    func friendlyTransitionErrorMessage(_ error: Error) -> String {
+        let raw = error.localizedDescription
+        if raw.localizedCaseInsensitiveContains("Invalid transition") {
+            return "That action is no longer valid for this loan's current status."
+        }
+        if raw.localizedCaseInsensitiveContains("Not authorized") {
+            return "You are not authorized to perform this action."
+        }
+        if raw.localizedCaseInsensitiveContains("Loan not found") {
+            return "This loan is no longer available."
+        }
+        if raw.localizedCaseInsensitiveContains("already signed") {
+            return "This agreement was already signed."
+        }
+        return raw
     }
     
     private func fetchPublicIP() async -> String? {
@@ -646,19 +622,6 @@ class LoanManager {
         }
     }
 
-    private func resolveLenderDisplayName(for user: User) async -> String {
-        if let profileName = await fetchUserFullName(userId: user.id),
-           !profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return profileName
-        }
-
-        if let email = user.email, let firstSegment = email.split(separator: "@").first, !firstSegment.isEmpty {
-            return String(firstSegment)
-        }
-
-        return "Lender"
-    }
-    
     func isLender(of loan: Loan) -> Bool {
         guard let user = supabase.auth.currentUser else { return false }
         return loan.lender_id == user.id

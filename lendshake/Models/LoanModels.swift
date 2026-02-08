@@ -117,6 +117,8 @@ struct Loan: Codable, Identifiable, Hashable {
     let borrower_name: String?
     let borrower_email: String?
     let borrower_phone: String?
+    var lender_name_snapshot: String?
+    var borrower_name_snapshot: String?
     var status: LoanStatus
     var remaining_balance: Double?
     let created_at: Date?
@@ -157,6 +159,8 @@ struct Loan: Codable, Identifiable, Hashable {
         self.borrower_name = borrowerName
         self.borrower_email = borrowerEmail
         self.borrower_phone = borrowerPhone
+        self.lender_name_snapshot = nil
+        self.borrower_name_snapshot = borrowerName
         self.status = .draft
         self.remaining_balance = principal // Initial balance = principal
         self.created_at = createdAt

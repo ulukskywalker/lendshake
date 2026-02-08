@@ -30,7 +30,6 @@ struct LoanDetailView: View {
     @State private var showReleaseSheet: Bool = false
     @State private var showFundingSheet: Bool = false
     @State private var lenderName: String = "Loading..."
-    @State private var didRunAutoChecks: Bool = false
     
     // Ledger States
     @State private var payments: [Payment] = []
@@ -113,15 +112,6 @@ struct LoanDetailView: View {
             }
         }
         .task(id: liveLoan.id) {
-            if !didRunAutoChecks {
-                do {
-                    try await loanManager.checkAutoEvents(for: liveLoan)
-                } catch {
-                    print("Loan auto-events error: \(error)")
-                }
-                didRunAutoChecks = true
-            }
-
             async let fetchedPayments = loanManager.fetchPayments(for: liveLoan)
             async let fetchedLenderName = resolveLenderName()
 
@@ -159,7 +149,7 @@ struct LoanDetailView: View {
         .sheet(isPresented: $showAgreementSheet) {
             NavigationStack {
                 ScrollView {
-                    Text(liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan, lenderName: lenderName))
+                    Text(liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan))
                         .padding()
                         .font(.system(.body, design: .monospaced))
                 }
@@ -169,7 +159,7 @@ struct LoanDetailView: View {
                         Button("Done") { showAgreementSheet = false }
                     }
                     ToolbarItem(placement: .topBarLeading) {
-                        ShareLink(item: liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan, lenderName: lenderName))
+                        ShareLink(item: liveLoan.agreement_text ?? AgreementGenerator.generate(for: liveLoan))
                     }
                     
                     // Show "Sign" button if the current user needs to sign
@@ -212,8 +202,8 @@ struct LoanDetailView: View {
                         LabeledContent("Maturity Date", value: liveLoan.maturity_date.formatted(date: .abbreviated, time: .omitted))
                     }
                     Section("Parties") {
-                        LabeledContent("Lender", value: lenderName)
-                        LabeledContent("Borrower", value: liveLoan.borrower_name ?? "Unknown")
+                        LabeledContent("Lender", value: liveLoan.lender_name_snapshot ?? lenderName)
+                        LabeledContent("Borrower", value: liveLoan.borrower_name_snapshot ?? liveLoan.borrower_name ?? "Unknown")
                     }
                 }
                 .navigationTitle("Loan Terms")
@@ -255,15 +245,25 @@ struct LoanDetailView: View {
                 Button("Cancel", role: .cancel) { }
                 Button("Forgive", role: .destructive) {
                     Task {
-                        try? await loanManager.updateLoanStatus(liveLoan, status: .forgiven)
+                        do {
+                            try await loanManager.transitionLoanStatus(liveLoan, status: .forgiven)
+                        } catch {
+                            errorMsg = loanManager.friendlyTransitionErrorMessage(error)
+                            showError = true
+                        }
                     }
                 }
             } message: { Text("This action cannot be undone.") }
             .alert("Delete Draft?", isPresented: $showDeleteDraftAlert) {
                 Button("Delete", role: .destructive) {
                     Task {
-                        try? await loanManager.deleteLoan(liveLoan)
-                        dismiss()
+                        do {
+                            try await loanManager.deleteLoan(liveLoan)
+                            dismiss()
+                        } catch {
+                            errorMsg = "Delete failed: \(error.localizedDescription)"
+                            showError = true
+                        }
                     }
                 }
             } message: { Text("Permanently delete this draft?") }
@@ -271,7 +271,12 @@ struct LoanDetailView: View {
                 Button("Keep Loan", role: .cancel) { }
                 Button("Cancel Loan", role: .destructive) {
                     Task {
-                        try? await loanManager.updateLoanStatus(liveLoan, status: .cancelled)
+                        do {
+                            try await loanManager.transitionLoanStatus(liveLoan, status: .cancelled)
+                        } catch {
+                            errorMsg = loanManager.friendlyTransitionErrorMessage(error)
+                            showError = true
+                        }
                     }
                 }
             } message: { Text("This will cancel the loan and stop the signature process.") }
@@ -279,7 +284,12 @@ struct LoanDetailView: View {
                 Button("Keep Reviewing", role: .cancel) { }
                 Button("Reject Loan", role: .destructive) {
                     Task {
-                        try? await loanManager.updateLoanStatus(liveLoan, status: .cancelled)
+                        do {
+                            try await loanManager.transitionLoanStatus(liveLoan, status: .cancelled)
+                        } catch {
+                            errorMsg = loanManager.friendlyTransitionErrorMessage(error)
+                            showError = true
+                        }
                     }
                 }
             } message: { Text("This will reject the agreement and cancel this loan request.") }
@@ -518,7 +528,12 @@ struct LoanDetailView: View {
         } else {
             Button {
                 Task {
-                    try? await loanManager.confirmReceipt(loan: liveLoan)
+                    do {
+                        try await loanManager.confirmReceipt(loan: liveLoan)
+                    } catch {
+                        errorMsg = loanManager.friendlyTransitionErrorMessage(error)
+                        showError = true
+                    }
                 }
             } label: {
                 HStack {

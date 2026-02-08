@@ -16,11 +16,11 @@ struct AccountView: View {
     @State private var phoneNumber = ""
     @State private var isEditing = false
     @State private var isSaving = false
-    @State private var errorMessage: String?
     @State private var firstNameError: String?
     @State private var lastNameError: String?
     @State private var phoneError: String?
-    @State private var showSaved = false
+    @State private var successToast: String?
+    @State private var errorToast: String?
 
     private let usStates = [
         "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
@@ -37,6 +37,9 @@ struct AccountView: View {
                     .textInputAutocapitalization(.words)
                     .disabled(!isEditing || isSaving)
                     .opacity(isEditing ? 1 : 0.65)
+                    .onChange(of: firstName) { _, _ in
+                        firstNameError = nil
+                    }
                 if let firstNameError {
                     Text(firstNameError)
                         .font(.caption)
@@ -47,6 +50,9 @@ struct AccountView: View {
                     .textInputAutocapitalization(.words)
                     .disabled(!isEditing || isSaving)
                     .opacity(isEditing ? 1 : 0.65)
+                    .onChange(of: lastName) { _, _ in
+                        lastNameError = nil
+                    }
                 if let lastNameError {
                     Text(lastNameError)
                         .font(.caption)
@@ -67,6 +73,9 @@ struct AccountView: View {
                     .keyboardType(.phonePad)
                     .disabled(!isEditing || isSaving)
                     .opacity(isEditing ? 1 : 0.65)
+                    .onChange(of: phoneNumber) { _, _ in
+                        phoneError = nil
+                    }
                 if let phoneError {
                     Text(phoneError)
                         .font(.caption)
@@ -78,18 +87,8 @@ struct AccountView: View {
                 }
             }
 
-            if let updated = authManager.currentUserProfile?.updated_at {
-                Section("Profile") {
-                    LabeledContent("Last Updated", value: updated.formatted(date: .abbreviated, time: .shortened))
-                }
-            }
-
-            if let errorMessage = errorMessage {
-                Section {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .font(.footnote)
-                }
+            Section("Profile") {
+                LabeledContent("Updated At", value: updatedAtLabel)
             }
 
             if isEditing {
@@ -119,7 +118,7 @@ struct AccountView: View {
                 Button(isEditing ? "Cancel" : "Edit") {
                     if isEditing {
                         loadProfile()
-                        errorMessage = nil
+                        clearFieldErrors()
                     }
                     isEditing.toggle()
                 }
@@ -137,11 +136,8 @@ struct AccountView: View {
                     .padding(.vertical, 8)
             }
         }
-        .alert("Saved", isPresented: $showSaved) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Your profile was updated.")
-        }
+        .lsToast(message: $successToast, style: .success)
+        .lsToast(message: $errorToast, style: .error)
     }
 
     private func loadProfile() {
@@ -154,11 +150,19 @@ struct AccountView: View {
         phoneNumber = profile.phone_number ?? ""
     }
 
-    private func saveProfile() async {
-        errorMessage = nil
+    private var updatedAtLabel: String {
+        guard let updated = authManager.currentUserProfile?.updated_at else { return "Not available" }
+        return updated.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func clearFieldErrors() {
         firstNameError = nil
         lastNameError = nil
         phoneError = nil
+    }
+
+    private func saveProfile() async {
+        clearFieldErrors()
 
         let normalizedFirst = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedLast = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -168,21 +172,27 @@ struct AccountView: View {
         if normalizedFirst.isEmpty {
             firstNameError = "First name is required."
             hasFieldError = true
+        } else if normalizedFirst.count < 2 {
+            firstNameError = "First name must be at least 2 characters."
+            hasFieldError = true
         }
         if normalizedLast.isEmpty {
             lastNameError = "Last name is required."
             hasFieldError = true
+        } else if normalizedLast.count < 2 {
+            lastNameError = "Last name must be at least 2 characters."
+            hasFieldError = true
         }
         if hasFieldError {
-            errorMessage = "Please fix highlighted fields."
+            errorToast = "Please fix highlighted fields."
             return
         }
 
         if !normalizedPhone.isEmpty {
             let digits = normalizedPhone.filter(\.isNumber).count
-            guard digits >= 10 else {
-                phoneError = "Phone must have at least 10 digits."
-                errorMessage = "Please fix highlighted fields."
+            guard digits >= 10 && digits <= 15 else {
+                phoneError = "Phone must include 10-15 digits."
+                errorToast = "Please fix highlighted fields."
                 return
             }
         }
@@ -201,9 +211,9 @@ struct AccountView: View {
             lastName = normalizedLast
             phoneNumber = normalizedPhone
             isEditing = false
-            showSaved = true
+            successToast = "Profile updated."
         } catch {
-            errorMessage = "Failed to save profile: \(error.localizedDescription)"
+            errorToast = "Failed to save profile: \(error.localizedDescription)"
         }
     }
 }

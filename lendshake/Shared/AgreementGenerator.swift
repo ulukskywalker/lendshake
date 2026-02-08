@@ -8,16 +8,19 @@
 import Foundation
 
 struct AgreementGenerator {
-    static func generate(for loan: Loan, lenderName: String? = nil) -> String {
+    static func generate(for loan: Loan) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
         formatter.currencyCode = "USD"
         
         let principalString = formatter.string(from: NSNumber(value: loan.principal_amount)) ?? "$\(loan.principal_amount)"
         let dateString = loan.maturity_date.formatted(date: .long, time: .omitted)
-        let trimmedLenderName = lenderName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedLenderName = (trimmedLenderName?.isEmpty == false ? trimmedLenderName : nil) ?? "Lender"
-        let borrowerName = loan.borrower_name ?? "Borrower"
+        let resolvedLenderName = loan.lender_name_snapshot?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? (loan.lender_name_snapshot ?? "Lender")
+            : "Lender"
+        let borrowerName = loan.borrower_name_snapshot?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? (loan.borrower_name_snapshot ?? "Borrower")
+            : "Borrower"
         
         let interest = loan.interest_rate
         let interestClause: String
@@ -64,7 +67,9 @@ struct AgreementGenerator {
         
         let principalString = formatter.string(from: NSNumber(value: loan.principal_amount)) ?? "$\(loan.principal_amount)"
         let dateString = Date().formatted(date: .long, time: .omitted)
-        let borrowerName = loan.borrower_name ?? "Borrower"
+        let borrowerName = loan.borrower_name_snapshot?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            ? (loan.borrower_name_snapshot ?? "Borrower")
+            : "Borrower"
         
         return """
         RELEASE OF PROMISSORY NOTE

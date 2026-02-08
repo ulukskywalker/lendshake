@@ -15,7 +15,11 @@ struct ProfileSetupView: View {
     @State private var phoneNumber: String = ""
     @State private var selectedState: String = "IL"
     @State private var isLoading: Bool = false
-    @State private var errorMessage: String?
+    @State private var firstNameError: String?
+    @State private var lastNameError: String?
+    @State private var phoneError: String?
+    @State private var successToast: String?
+    @State private var errorToast: String?
     
     let usStates = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"]
     
@@ -29,14 +33,38 @@ struct ProfileSetupView: View {
                     
                     TextField("Legal First Name", text: $firstName)
                         .textInputAutocapitalization(.words)
+                        .onChange(of: firstName) { _, _ in
+                            firstNameError = nil
+                        }
+                    if let firstNameError {
+                        Text(firstNameError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                     
                     TextField("Legal Last Name", text: $lastName)
                         .textInputAutocapitalization(.words)
+                        .onChange(of: lastName) { _, _ in
+                            lastNameError = nil
+                        }
+                    if let lastNameError {
+                        Text(lastNameError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
                 
                 Section(header: Text("Contact Info")) {
                     TextField("Mobile Phone", text: $phoneNumber)
                         .keyboardType(.phonePad)
+                        .onChange(of: phoneNumber) { _, _ in
+                            phoneError = nil
+                        }
+                    if let phoneError {
+                        Text(phoneError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                     
                     Picker("State of Residence", selection: $selectedState) {
                         ForEach(usStates, id: \.self) { state in
@@ -44,14 +72,7 @@ struct ProfileSetupView: View {
                         }
                     }
                 }
-                
-                if let errorMessage = errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                    }
-                }
-                
+
                 Section {
                     Button {
                         Task {
@@ -71,28 +92,73 @@ struct ProfileSetupView: View {
                                 .foregroundColor(.white)
                         }
                     }
-                    .disabled(firstName.isEmpty || lastName.isEmpty || phoneNumber.isEmpty || isLoading)
+                    .disabled(isLoading)
                     .listRowBackground(Color.blue)
                 }
             }
             .navigationTitle("Your Profile")
             .interactiveDismissDisabled()
+            .lsToast(message: $successToast, style: .success)
+            .lsToast(message: $errorToast, style: .error)
         }
     }
     
+    private func clearFieldErrors() {
+        firstNameError = nil
+        lastNameError = nil
+        phoneError = nil
+    }
+
     private func saveProfile() async {
+        clearFieldErrors()
         isLoading = true
-        errorMessage = nil
+
+        let normalizedFirst = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedLast = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPhone = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var hasFieldError = false
+        if normalizedFirst.isEmpty {
+            firstNameError = "First name is required."
+            hasFieldError = true
+        } else if normalizedFirst.count < 2 {
+            firstNameError = "First name must be at least 2 characters."
+            hasFieldError = true
+        }
+
+        if normalizedLast.isEmpty {
+            lastNameError = "Last name is required."
+            hasFieldError = true
+        } else if normalizedLast.count < 2 {
+            lastNameError = "Last name must be at least 2 characters."
+            hasFieldError = true
+        }
+
+        let phoneDigits = normalizedPhone.filter(\.isNumber).count
+        if normalizedPhone.isEmpty {
+            phoneError = "Phone number is required."
+            hasFieldError = true
+        } else if phoneDigits < 10 || phoneDigits > 15 {
+            phoneError = "Phone must include 10-15 digits."
+            hasFieldError = true
+        }
+
+        if hasFieldError {
+            errorToast = "Please fix highlighted fields."
+            isLoading = false
+            return
+        }
         
         do {
             try await authManager.createProfile(
-                firstName: firstName,
-                lastName: lastName,
+                firstName: normalizedFirst,
+                lastName: normalizedLast,
                 state: selectedState,
-                phoneNumber: phoneNumber
+                phoneNumber: normalizedPhone
             )
+            successToast = "Profile saved."
         } catch {
-            errorMessage = "Failed to save profile: \(error.localizedDescription)"
+            errorToast = "Failed to save profile: \(error.localizedDescription)"
         }
         
         isLoading = false

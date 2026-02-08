@@ -114,7 +114,7 @@ struct FundingSheet: View {
                 try await loanManager.confirmFunding(loan: loan, proofURL: proofURL)
                 isPresented = false
             } catch {
-                errorMsg = error.localizedDescription
+                errorMsg = loanManager.friendlyTransitionErrorMessage(error)
             }
             isLoading = false
         }

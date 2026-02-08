@@ -16,17 +16,17 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private let center = UNUserNotificationCenter.current()
     private let managedPrefix = "loan.event."
-    private let remindersEnabledKey = "notifications.reminders.enabled"
+    private let actionNotificationsEnabledKey = "notifications.actions.enabled"
 
     var authorizationStatus: UNAuthorizationStatus = .notDetermined
-    var remindersEnabled: Bool
+    var actionNotificationsEnabled: Bool
 
     var notificationsEnabledInSystem: Bool {
         authorizationStatus == .authorized || authorizationStatus == .provisional
     }
 
     private override init() {
-        remindersEnabled = UserDefaults.standard.object(forKey: remindersEnabledKey) as? Bool ?? true
+        actionNotificationsEnabled = UserDefaults.standard.object(forKey: actionNotificationsEnabledKey) as? Bool ?? true
         super.init()
         center.delegate = self
         Task { await refreshAuthorizationStatus() }
@@ -52,9 +52,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    func applyReminderPreferences(enabled: Bool, reminderAt: Date? = nil) {
-        remindersEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: remindersEnabledKey)
+    func setActionNotificationsEnabled(_ enabled: Bool) {
+        actionNotificationsEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: actionNotificationsEnabledKey)
     }
 
     func clearManagedNotifications() async {
@@ -68,7 +68,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     func postEventNotification(eventID: String, title: String, body: String) async {
         await refreshAuthorizationStatus()
 
-        guard remindersEnabled, notificationsEnabledInSystem else { return }
+        guard actionNotificationsEnabled, notificationsEnabledInSystem else { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
