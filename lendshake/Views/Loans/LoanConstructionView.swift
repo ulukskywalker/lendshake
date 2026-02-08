@@ -57,6 +57,10 @@ struct LoanConstructionView: View {
     
     @State private var lateFeePolicy: String = "0"
     @State private var lateFeeSliderValue: Double = 0
+    @State private var amountShakeTrigger: CGFloat = 0
+    private let maxPrincipalAmount: Double = 10_000
+    private let maxPrincipalMessage: String = "Only $10,000 is allowed."
+    private let maxInterestRate: Double = 15
 
     enum RepaymentSchedule: String, CaseIterable, Identifiable {
         case monthly = "Monthly"
@@ -211,24 +215,38 @@ struct LoanConstructionView: View {
             
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("$")
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .font(.system(size: amountInputFontSize, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
-                    .minimumScaleFactor(0.6)
                 
                 TextField("0", text: $principalAmount)
-                    .font(.system(size: 72, weight: .bold, design: .rounded))
+                    .font(.system(size: amountInputFontSize, weight: .bold, design: .rounded))
+                    .monospacedDigit()
                     .keyboardType(.decimalPad)
                     .focused($isPrincipalFieldFocused)
                     .multilineTextAlignment(.center)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.5)
                     .frame(minWidth: 80, maxWidth: 220)
                     .onChange(of: principalAmount) { _, newValue in
-                        principalAmount = sanitizeCurrencyInput(newValue)
+                        let result = sanitizeCurrencyInput(newValue)
+                        principalAmount = result.value
+                        if result.didRejectForLimit {
+                            triggerAmountLimitFeedback()
+                        }
                     }
+            }
+            .modifier(ShakeEffect(animatableData: amountShakeTrigger))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isPrincipalFieldFocused = true
             }
             .fixedSize(horizontal: true, vertical: false)
             .frame(maxWidth: 320)
+
+            tipCard(
+                title: "Quick tip",
+                message: "We keep loans up to $10,000 so agreements stay simple, personal, and easy to manage."
+            )
+            .padding(.horizontal, 24)
             
             // Reverted to Text Input Only per user request
             Spacer()
@@ -310,6 +328,14 @@ struct LoanConstructionView: View {
                                     .keyboardType(.decimalPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 80)
+                                    .onChange(of: interestRate) { _, newValue in
+                                        let result = sanitizeInterestInput(newValue)
+                                        interestRate = result.value
+                                        interestSliderValue = result.sliderValue
+                                        if result.didRejectForLimit {
+                                            errorMessage = "Interest rate cannot exceed 15%."
+                                        }
+                                    }
                                 Text("%")
                                     .font(.body)
                                     .foregroundStyle(.secondary)
@@ -338,6 +364,11 @@ struct LoanConstructionView: View {
                         .foregroundStyle(.secondary)
                     }
                     .padding(.top, 4)
+
+                    tipCard(
+                        title: "Quick tip",
+                        message: "Rate is capped at 15% to keep terms fair and avoid heavy, bank-style lending."
+                    )
                 }
                 .padding()
                 .background(Color.lsCardBackground)
@@ -396,6 +427,11 @@ struct LoanConstructionView: View {
                             lateFeePolicy = String(format: "%.0f", newValue)
                             triggerSelectionHaptic()
                         }
+
+                    tipCard(
+                        title: "Late fee policy",
+                        message: "If set, this fee applies to each missed payment installment, not only the final due date."
+                    )
                 }
                 .padding()
                 .background(Color.lsCardBackground)
@@ -651,6 +687,20 @@ struct LoanConstructionView: View {
     }
     
     // MARK: - Helpers
+    private var amountInputFontSize: CGFloat {
+        let digitCount = principalAmount.filter(\.isNumber).count
+        switch digitCount {
+        case 0...4:
+            return 72
+        case 5...6:
+            return 62
+        case 7...8:
+            return 54
+        default:
+            return 46
+        }
+    }
+
     private func validateAmountStep() -> Bool {
         let cleaned = principalAmount.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let amount = Double(cleaned), amount > 0 else {
@@ -668,6 +718,10 @@ struct LoanConstructionView: View {
         let cleanedInterest = interestRate.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let rate = Double(cleanedInterest), rate >= 0 else {
             errorMessage = "Interest rate must be 0 or higher."
+            return false
+        }
+        guard rate <= maxInterestRate else {
+            errorMessage = "Interest rate cannot exceed 15%."
             return false
         }
 
@@ -723,16 +777,101 @@ struct LoanConstructionView: View {
         #endif
     }
 
-    private func sanitizeCurrencyInput(_ value: String) -> String {
+    private func triggerAmountLimitFeedback() {
+        withAnimation(.linear(duration: 0.35)) {
+            amountShakeTrigger += 1
+        }
+        // Force banner refresh even if the same message is already shown.
+        errorMessage = nil
+        DispatchQueue.main.async {
+            withAnimation {
+                errorMessage = maxPrincipalMessage
+            }
+        }
+        #if os(iOS)
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.warning)
+        #endif
+    }
+
+    private func sanitizeCurrencyInput(_ value: String) -> (value: String, didRejectForLimit: Bool) {
         let filtered = value.filter { $0.isNumber || $0 == "." }
         let parts = filtered.split(separator: ".", omittingEmptySubsequences: false)
+        let normalized: String
+
         if parts.count <= 1 {
-            return filtered
+            normalized = filtered
+        } else {
+            let integerPart = String(parts[0])
+            let decimalPart = String(parts[1].prefix(2))
+            normalized = "\(integerPart).\(decimalPart)"
         }
 
-        let integerPart = String(parts[0])
-        let decimalPart = String(parts[1].prefix(2))
-        return "\(integerPart).\(decimalPart)"
+        guard let amount = Double(normalized), amount > maxPrincipalAmount else {
+            return (normalized, false)
+        }
+
+        return ("10000", true)
+    }
+
+    private func sanitizeInterestInput(_ value: String) -> (value: String, sliderValue: Double, didRejectForLimit: Bool) {
+        let filtered = value.filter { $0.isNumber || $0 == "." }
+        let parts = filtered.split(separator: ".", omittingEmptySubsequences: false)
+
+        let normalized: String
+        if parts.count <= 1 {
+            normalized = filtered
+        } else {
+            normalized = "\(parts[0]).\(parts[1].prefix(1))"
+        }
+
+        guard let parsed = Double(normalized) else {
+            return (normalized, 0, false)
+        }
+
+        if parsed > maxInterestRate {
+            return (String(format: "%.1f", maxInterestRate), maxInterestRate, true)
+        }
+
+        return (String(format: "%.1f", parsed), parsed, false)
+    }
+
+    @ViewBuilder
+    private func tipCard(title: String, message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "lightbulb.fill")
+                .font(.caption)
+                .foregroundStyle(Color.lsPrimary)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.lsPrimary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+}
+
+private struct ShakeEffect: GeometryEffect {
+    var amount: CGFloat = 8
+    var shakesPerUnit: CGFloat = 3
+    var animatableData: CGFloat
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(
+            CGAffineTransform(
+                translationX: amount * sin(animatableData * .pi * shakesPerUnit),
+                y: 0
+            )
+        )
     }
 }
 

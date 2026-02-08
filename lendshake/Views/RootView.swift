@@ -13,7 +13,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if authManager.isLoading {
-                ProgressView()
+                SplashLoadingView()
             } else if authManager.isAuthenticated {
                 if authManager.isProfileComplete {
                     ContentView()
@@ -25,6 +25,32 @@ struct RootView: View {
             } else {
                 WelcomeView()
             }
+        }
+    }
+}
+
+private struct SplashLoadingView: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.lsPrimary.opacity(0.2), Color.lsBackground],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                Image(systemName: "banknote.fill")
+                    .font(.system(size: 54, weight: .semibold))
+                    .foregroundStyle(Color.lsPrimary)
+
+                Text("Lendshake")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+
+                ProgressView("Loading...")
+                    .tint(Color.lsPrimary)
+            }
+            .padding(24)
         }
     }
 }

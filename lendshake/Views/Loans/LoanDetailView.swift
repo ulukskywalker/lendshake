@@ -89,7 +89,7 @@ struct LoanDetailView: View {
                         Label("View Terms", systemImage: "list.clipboard")
                     }
                     
-                    if isLender {
+                    if isLender && (liveLoan.status == .draft || liveLoan.status == .sent || liveLoan.status == .active) {
                         Button(role: .destructive) {
                             if liveLoan.status == .draft {
                                 showDeleteDraftAlert = true
@@ -102,7 +102,7 @@ struct LoanDetailView: View {
                             Label(
                                 liveLoan.status == .draft ? "Delete Draft" :
                                 liveLoan.status == .sent ? "Cancel Request" :
-                                liveLoan.status == .active ? "Forgive Loan" : "",
+                                "Forgive Loan",
                                 systemImage: "trash"
                             )
                         }

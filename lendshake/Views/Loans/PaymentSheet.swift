@@ -23,6 +23,7 @@ struct PaymentSheet: View {
     // Photo Picker State
     @State private var selectedItem: PhotosPickerItem? = nil
     @State private var selectedImageData: Data? = nil
+    @FocusState private var isAmountFieldFocused: Bool
     
     var body: some View {
         NavigationStack {
@@ -30,6 +31,7 @@ struct PaymentSheet: View {
                 Section("Payment Details") {
                     TextField("Amount ($)", value: $amount, format: .currency(code: "USD"))
                         .keyboardType(.decimalPad)
+                        .focused($isAmountFieldFocused)
                     
                     DatePicker("Date Paid", selection: $date, displayedComponents: [.date, .hourAndMinute])
                 }
@@ -85,9 +87,16 @@ struct PaymentSheet: View {
                 }
             }
             .navigationTitle("Record Payment")
+            .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { isPresented = false }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        isAmountFieldFocused = false
+                    }
                 }
             }
         }

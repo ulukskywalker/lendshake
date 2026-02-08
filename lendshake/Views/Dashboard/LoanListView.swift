@@ -43,7 +43,18 @@ struct LoanListView: View {
     
     var body: some View {
         List {
-            if loanManager.loans.isEmpty {
+            if loanManager.isLoading && loanManager.loans.isEmpty {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Loading loans...")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .padding(.top, 40)
+            } else if loanManager.loans.isEmpty {
                 ContentUnavailableView("No Shakes Yet", systemImage: "doc.text.magnifyingglass")
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -123,6 +134,14 @@ struct LoanListView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.lsBackground)
+        .overlay(alignment: .top) {
+            if loanManager.isLoading && !loanManager.loans.isEmpty {
+                ProgressView()
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.top, 8)
+            }
+        }
         .alert("Delete Draft Loan?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
