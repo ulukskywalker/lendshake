@@ -14,7 +14,20 @@ import Supabase
 class LoanManager {
     var loans: [Loan] = []
     var isLoading: Bool = false
+    var pendingApprovalCount: Int = 0
+    var requiredActionCount: Int = 0
+    var pendingRepaymentApprovalsByLoanID: [UUID: Int] = [:]
     private var realtimeChannel: RealtimeChannelV2?
+    private var realtimeChangesTask: Task<Void, Never>?
+    private var realtimeSubscriptionUserID: UUID?
+    private var paymentsRealtimeChannel: RealtimeChannelV2?
+    private var paymentsRealtimeChangesTask: Task<Void, Never>?
+    private var paymentsRealtimeSubscriptionUserID: UUID?
+    private static let realtimeDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
     
     func fetchLoans() async throws {
         self.isLoading = true
@@ -38,9 +51,12 @@ class LoanManager {
             
             print("DEBUG: Fetched \(loans.count) loans for \(userEmail) (ID: \(user.id))")
             self.loans = loans
+            recomputeRequiredActionCount()
             
             // Subscribe to real-time updates
-            await subscribeToLoans()
+            await subscribeToLoans(for: user)
+            await subscribeToPayments(for: user)
+            await refreshPendingApprovalCount()
         } catch {
             print("DEBUG: Fetch Loans Error: \(error)")
             // If table doesn't exist, this will print.
@@ -48,12 +64,19 @@ class LoanManager {
         }
     }
     
-    private func subscribeToLoans() async {
-        guard let user = supabase.auth.currentUser else { return }
+    private func subscribeToLoans(for user: User) async {
+        if realtimeSubscriptionUserID == user.id,
+           realtimeChannel != nil,
+           realtimeChangesTask != nil {
+            return
+        }
         
         // Remove existing channel if any
+        realtimeChangesTask?.cancel()
+        realtimeChangesTask = nil
         if let existing = realtimeChannel {
             await existing.unsubscribe()
+            realtimeChannel = nil
         }
         
         // Create new channel
@@ -66,8 +89,9 @@ class LoanManager {
         )
         
         // Listen in a separate task so we don't block
-        Task {
+        realtimeChangesTask = Task {
             for await change in changes {
+                if Task.isCancelled { break }
                 await handleRealtimeChange(change, userId: user.id, userEmail: user.email ?? "")
             }
         }
@@ -75,36 +99,38 @@ class LoanManager {
         do {
             try await channel.subscribeWithError()
             self.realtimeChannel = channel
+            self.realtimeSubscriptionUserID = user.id
         } catch {
             print("ERROR: Exception during subscription: \(error)")
+            realtimeChangesTask?.cancel()
+            realtimeChangesTask = nil
         }
     }
     
     private func handleRealtimeChange(_ change: AnyAction, userId: UUID, userEmail: String) async {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        let decoder = Self.realtimeDecoder
         
         switch change {
         case .insert(let action):
             guard let loan = try? action.decodeRecord(as: Loan.self, decoder: decoder) else { return }
             if shouldInclude(loan, userId: userId, userEmail: userEmail) {
-                 withAnimation {
-                     self.loans.insert(loan, at: 0)
-                 }
+                withAnimation {
+                    upsertLoan(loan)
+                }
             }
         case .update(let action):
             guard let loan = try? action.decodeRecord(as: Loan.self, decoder: decoder) else { return }
+            let previousStatus = decodeLoanStatus(from: action.oldRecord)
             if let index = self.loans.firstIndex(where: { $0.id == loan.id }) {
                 withAnimation {
                     self.loans[index] = loan
                 }
             } else if shouldInclude(loan, userId: userId, userEmail: userEmail) {
-                // It was updated effectively adding it to our list
-                 withAnimation {
-                     self.loans.insert(loan, at: 0)
-                     self.loans.sort(by: { ($0.created_at ?? Date()) > ($1.created_at ?? Date()) })
-                 }
+                withAnimation {
+                    insertLoanInCreatedOrder(loan)
+                }
             }
+            await notifyLoanStatusTransition(oldStatus: previousStatus, newLoan: loan, currentUserID: userId)
         case .delete(let action):
             let oldRecord = action.oldRecord
             guard let data = try? JSONEncoder().encode(oldRecord),
@@ -114,6 +140,9 @@ class LoanManager {
                  self.loans.removeAll(where: { $0.id == deleted.id })
              }
         }
+        
+        recomputeRequiredActionCount()
+        await refreshPendingApprovalCount()
     }
     
     struct DeletedRecord: Decodable {
@@ -124,6 +153,275 @@ class LoanManager {
         return loan.lender_id == userId ||
                loan.borrower_id == userId ||
                loan.borrower_email == userEmail
+    }
+
+    private func upsertLoan(_ loan: Loan) {
+        if let index = loans.firstIndex(where: { $0.id == loan.id }) {
+            loans[index] = loan
+            return
+        }
+        insertLoanInCreatedOrder(loan)
+    }
+
+    private func insertLoanInCreatedOrder(_ loan: Loan) {
+        let insertedDate = loan.created_at ?? .distantPast
+        let targetIndex = loans.firstIndex {
+            ($0.created_at ?? .distantPast) < insertedDate
+        } ?? loans.endIndex
+        loans.insert(loan, at: targetIndex)
+    }
+
+    private struct PendingPaymentRecord: Decodable {
+        let loan_id: UUID
+    }
+
+    private func subscribeToPayments(for user: User) async {
+        if paymentsRealtimeSubscriptionUserID == user.id,
+           paymentsRealtimeChannel != nil,
+           paymentsRealtimeChangesTask != nil {
+            return
+        }
+
+        paymentsRealtimeChangesTask?.cancel()
+        paymentsRealtimeChangesTask = nil
+        if let existing = paymentsRealtimeChannel {
+            await existing.unsubscribe()
+            paymentsRealtimeChannel = nil
+        }
+
+        let channel = supabase.realtimeV2.channel("public:payments")
+        let changes = channel.postgresChange(
+            AnyAction.self,
+            schema: "public",
+            table: "payments"
+        )
+
+        paymentsRealtimeChangesTask = Task {
+            for await change in changes {
+                if Task.isCancelled { break }
+                await handlePaymentRealtimeChange(change, currentUserID: user.id)
+                await refreshPendingApprovalCount()
+            }
+        }
+
+        do {
+            try await channel.subscribeWithError()
+            paymentsRealtimeChannel = channel
+            paymentsRealtimeSubscriptionUserID = user.id
+        } catch {
+            print("ERROR: Payments realtime subscription failed: \(error)")
+            paymentsRealtimeChangesTask?.cancel()
+            paymentsRealtimeChangesTask = nil
+        }
+    }
+
+    private func handlePaymentRealtimeChange(_ change: AnyAction, currentUserID: UUID) async {
+        let decoder = Self.realtimeDecoder
+
+        switch change {
+        case .insert(let action):
+            guard let payment = try? action.decodeRecord(as: Payment.self, decoder: decoder),
+                  payment.type == .repayment,
+                  payment.status == .pending,
+                  let loan = loans.first(where: { $0.id == payment.loan_id }),
+                  loan.lender_id == currentUserID,
+                  let paymentID = payment.id else {
+                return
+            }
+
+            await NotificationManager.shared.postEventNotification(
+                eventID: "payment.\(paymentID.uuidString).pending",
+                title: "Payment Needs Approval",
+                body: "A borrower submitted a repayment for your review."
+            )
+
+        case .update(let action):
+            guard let payment = try? action.decodeRecord(as: Payment.self, decoder: decoder),
+                  let loan = loans.first(where: { $0.id == payment.loan_id }),
+                  let paymentID = payment.id else {
+                return
+            }
+
+            let oldStatus = decodePaymentStatus(from: action.oldRecord)
+            guard oldStatus != payment.status else { return }
+
+            let isLender = loan.lender_id == currentUserID
+            if !isLender, oldStatus == .pending, payment.status == .approved {
+                await NotificationManager.shared.postEventNotification(
+                    eventID: "payment.\(paymentID.uuidString).approved",
+                    title: "Payment Approved",
+                    body: "Your repayment was approved by the lender."
+                )
+            } else if !isLender, oldStatus == .pending, payment.status == .rejected {
+                await NotificationManager.shared.postEventNotification(
+                    eventID: "payment.\(paymentID.uuidString).rejected",
+                    title: "Payment Rejected",
+                    body: "Your repayment was rejected. Please review details."
+                )
+            }
+
+        case .delete:
+            break
+        }
+    }
+
+    private func decodePaymentStatus(from oldRecord: [String: AnyJSON]) -> PaymentStatus? {
+        guard let data = try? JSONEncoder().encode(oldRecord),
+              let snapshot = try? Self.realtimeDecoder.decode(PaymentStatusSnapshot.self, from: data) else {
+            return nil
+        }
+        return snapshot.status
+    }
+
+    private struct PaymentStatusSnapshot: Decodable {
+        let status: PaymentStatus?
+    }
+
+    func refreshPendingApprovalCount() async {
+        guard let user = supabase.auth.currentUser else {
+            pendingRepaymentApprovalsByLoanID = [:]
+            pendingApprovalCount = 0
+            recomputeRequiredActionCount()
+            return
+        }
+
+        let lenderLoanIDs = loans
+            .filter { $0.lender_id == user.id }
+            .compactMap(\.id)
+
+        guard !lenderLoanIDs.isEmpty else {
+            pendingRepaymentApprovalsByLoanID = [:]
+            pendingApprovalCount = 0
+            recomputeRequiredActionCount()
+            return
+        }
+
+        do {
+            let pendingPayments: [PendingPaymentRecord] = try await supabase
+                .from("payments")
+                .select("loan_id")
+                .eq("status", value: PaymentStatus.pending.rawValue)
+                .eq("type", value: PaymentType.repayment.rawValue)
+                .execute()
+                .value
+
+            let lenderLoanIDSet = Set(lenderLoanIDs)
+            let byLoan = pendingPayments.reduce(into: [UUID: Int]()) { counts, payment in
+                if lenderLoanIDSet.contains(payment.loan_id) {
+                    counts[payment.loan_id, default: 0] += 1
+                }
+            }
+            pendingRepaymentApprovalsByLoanID = byLoan
+            pendingApprovalCount = byLoan.values.reduce(0, +)
+            recomputeRequiredActionCount()
+        } catch {
+            pendingRepaymentApprovalsByLoanID = [:]
+            pendingApprovalCount = 0
+            recomputeRequiredActionCount()
+            print("Pending approval count refresh error: \(error)")
+        }
+    }
+
+    private func recomputeRequiredActionCount() {
+        guard let user = supabase.auth.currentUser else {
+            requiredActionCount = 0
+            return
+        }
+
+        requiredActionCount = countLoanWorkflowActions(for: user) + pendingApprovalCount
+    }
+
+    private func countLoanWorkflowActions(for user: User) -> Int {
+        loans.reduce(into: 0) { count, loan in
+            let isLender = loan.lender_id == user.id
+
+            switch loan.status {
+            case .draft where isLender && loan.lender_signed_at == nil:
+                count += 1
+            case .sent where !isLender && loan.borrower_signed_at == nil:
+                count += 1
+            case .approved where isLender:
+                count += 1
+            case .funding_sent where !isLender:
+                count += 1
+            default:
+                break
+            }
+        }
+    }
+
+    private func decodeLoanStatus(from oldRecord: [String: AnyJSON]) -> LoanStatus? {
+        guard let data = try? JSONEncoder().encode(oldRecord),
+              let snapshot = try? Self.realtimeDecoder.decode(LoanStatusSnapshot.self, from: data) else {
+            return nil
+        }
+        return snapshot.status
+    }
+
+    private struct LoanStatusSnapshot: Decodable {
+        let status: LoanStatus?
+    }
+
+    private func notifyLoanStatusTransition(oldStatus: LoanStatus?, newLoan: Loan, currentUserID: UUID) async {
+        guard let oldStatus, oldStatus != newLoan.status, let loanID = newLoan.id else { return }
+        let isLender = newLoan.lender_id == currentUserID
+
+        switch (oldStatus, newLoan.status) {
+        case (.draft, .sent) where !isLender:
+            await NotificationManager.shared.postEventNotification(
+                eventID: "loan.\(loanID.uuidString).draft_to_sent",
+                title: "New Loan Request",
+                body: "A lender sent you an agreement to review and sign."
+            )
+        case (.sent, .approved) where isLender:
+            await NotificationManager.shared.postEventNotification(
+                eventID: "loan.\(loanID.uuidString).sent_to_approved",
+                title: "Borrower Signed",
+                body: "The borrower signed the agreement. Send funds to continue."
+            )
+        case (.approved, .funding_sent) where !isLender:
+            await NotificationManager.shared.postEventNotification(
+                eventID: "loan.\(loanID.uuidString).approved_to_funding_sent",
+                title: "Funds Sent",
+                body: "The lender marked funds as sent. Confirm receipt in the app."
+            )
+        case (.funding_sent, .active) where isLender:
+            await NotificationManager.shared.postEventNotification(
+                eventID: "loan.\(loanID.uuidString).funding_sent_to_active",
+                title: "Loan Activated",
+                body: "The borrower confirmed receipt. The loan is now active."
+            )
+        case (.active, .completed):
+            await NotificationManager.shared.postEventNotification(
+                eventID: "loan.\(loanID.uuidString).active_to_completed",
+                title: "Loan Completed",
+                body: "A loan has been marked completed."
+            )
+        default:
+            break
+        }
+    }
+
+    func requiredActionLabel(for loan: Loan) -> String? {
+        guard let user = supabase.auth.currentUser else { return nil }
+        let isLender = loan.lender_id == user.id
+
+        if isLender, let loanId = loan.id, let pendingCount = pendingRepaymentApprovalsByLoanID[loanId], pendingCount > 0 {
+            return pendingCount == 1 ? "Approve 1 payment" : "Approve \(pendingCount) payments"
+        }
+
+        switch loan.status {
+        case .draft:
+            return (isLender && loan.lender_signed_at == nil) ? "Sign agreement" : nil
+        case .sent:
+            return (!isLender && loan.borrower_signed_at == nil) ? "Review and sign agreement" : nil
+        case .approved:
+            return isLender ? "Send funds confirmation" : nil
+        case .funding_sent:
+            return !isLender ? "Confirm receipt" : nil
+        default:
+            return nil
+        }
     }
     
     func createDraftLoan(
@@ -398,9 +696,18 @@ class LoanManager {
     
     func updatePaymentStatus(payment: Payment, newStatus: PaymentStatus, loan: Loan) async throws {
         guard let paymentId = payment.id else { return }
-        guard let loanId = loan.id else { return }
         
-        // 1. Update Payment
+        if newStatus == .approved {
+            let params: [String: String] = ["p_payment_id": paymentId.uuidString]
+            _ = try await supabase
+                .rpc("approve_payment_and_recompute_balance", params: params)
+                .execute()
+
+            try await fetchLoans()
+            return
+        }
+
+        // Non-approval states keep simple payment-status update path.
         struct PaymentUpdate: Encodable {
             let status: PaymentStatus
         }
@@ -411,33 +718,7 @@ class LoanManager {
             .eq("id", value: paymentId)
             .execute()
             
-        // 2. If Approved, update Loan Balance
-        if newStatus == .approved {
-            // We need to fetch the fresh current balance to be safe, or calculate based on local 'liveLoan'
-            // For MVP, we'll trust the local + deduction, or better yet, trigger a DB function if possible.
-            // But here, client-side logic:
-            
-            let currentBalance = loan.remaining_balance ?? loan.principal_amount
-            let newBalance = max(0, currentBalance - payment.amount)
-            
-            if newBalance <= 0 {
-                // Generate Release Document
-                let releaseDoc = AgreementGenerator.generateRelease(for: loan)
-                try await supabase
-                    .from("loans")
-                    .update(BalanceUpdate(remaining_balance: 0, status: .completed, release_document_text: releaseDoc))
-                    .eq("id", value: loanId)
-                    .execute()
-            } else {
-                try await supabase
-                    .from("loans")
-                    .update(BalanceOnlyUpdate(remaining_balance: newBalance))
-                    .eq("id", value: loanId)
-                    .execute()
-            }
-                
-            // Refresh loans to get new balance
-            try await fetchLoans()
-        }
+        // Keep loan list consistent if status is rejected.
+        try await fetchLoans()
     }
 }

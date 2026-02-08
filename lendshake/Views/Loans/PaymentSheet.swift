@@ -13,6 +13,7 @@ import Supabase
 struct PaymentSheet: View {
     let loan: Loan
     @Binding var isPresented: Bool
+    let onSubmitted: (() -> Void)?
     @Environment(LoanManager.self) var loanManager
     
     @State private var amount: Double?
@@ -121,6 +122,7 @@ struct PaymentSheet: View {
                 }
                 
                 try await loanManager.submitPayment(for: loan, amount: amount, date: date, proofURL: proofURL)
+                onSubmitted?()
                 isPresented = false
             } catch {
                 errorMsg = error.localizedDescription

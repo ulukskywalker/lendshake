@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Supabase
 
 struct LoanDetailView: View {
     let loan: Loan
@@ -29,11 +30,15 @@ struct LoanDetailView: View {
     @State private var showReleaseSheet: Bool = false
     @State private var showFundingSheet: Bool = false
     @State private var lenderName: String = "Loading..."
+    @State private var didRunAutoChecks: Bool = false
     
     // Ledger States
     @State private var payments: [Payment] = []
     @State private var showPaymentSheet: Bool = false
     @State private var selectedPayment: Payment? // For detailed view
+    @State private var paymentsRealtimeChannel: RealtimeChannelV2?
+    @State private var paymentsRealtimeTask: Task<Void, Never>?
+    @State private var didSubmitPaymentSheet: Bool = false
 
 
     
@@ -64,12 +69,7 @@ struct LoanDetailView: View {
             .padding()
         }
         .refreshable {
-            do {
-                try await loanManager.fetchLoans()
-                self.payments = try await loanManager.fetchPayments(for: liveLoan)
-            } catch {
-                print("Refresh Error: \(error)")
-            }
+            await refreshLoanDetailData()
         }
         .background(Color.lsBackground)
         .navigationTitle(liveLoan.borrower_name ?? "Loan Ledger")
@@ -112,40 +112,48 @@ struct LoanDetailView: View {
                 }
             }
         }
-        .onAppear {
-            Task {
-                // 1. Run Auto-Check for Fees (Catch-Up)
+        .task(id: liveLoan.id) {
+            if !didRunAutoChecks {
                 do {
                     try await loanManager.checkAutoEvents(for: liveLoan)
                 } catch {
                     print("Loan auto-events error: \(error)")
                 }
-                
-                // 2. Refresh Payments
-                if let fetchedPayments = try? await loanManager.fetchPayments(for: liveLoan) {
-                    self.payments = fetchedPayments
-                }
-                
-                // 3. Fetch Lender Name
-                await fetchLenderName()
+                didRunAutoChecks = true
             }
+
+            async let fetchedPayments = loanManager.fetchPayments(for: liveLoan)
+            async let fetchedLenderName = resolveLenderName()
+
+            if let refreshedPayments = try? await fetchedPayments {
+                payments = refreshedPayments
+            }
+            lenderName = await fetchedLenderName
+            await subscribeToPaymentsRealtime()
+        }
+        .onDisappear {
+            Task { await unsubscribeFromPaymentsRealtime() }
         }
         .sheet(isPresented: $showPaymentSheet) {
-            PaymentSheet(loan: liveLoan, isPresented: $showPaymentSheet)
+            PaymentSheet(
+                loan: liveLoan,
+                isPresented: $showPaymentSheet,
+                onSubmitted: {
+                    didSubmitPaymentSheet = true
+                    Task { await refreshLoanDetailData() }
+                }
+            )
                 .onDisappear {
-                    Task {
-                        try? await loanManager.fetchLoans()
-                        self.payments = try await loanManager.fetchPayments(for: liveLoan)
+                    if !didSubmitPaymentSheet {
+                        Task { await refreshLoanDetailData() }
                     }
+                    didSubmitPaymentSheet = false
                 }
         }
         .sheet(item: $selectedPayment) { payment in
             TransactionDetailView(payment: payment, loan: liveLoan, isLender: isLender)
                 .onDisappear {
-                    Task {
-                        self.payments = try await loanManager.fetchPayments(for: liveLoan)
-                        try? await loanManager.fetchLoans() // Refresh balance
-                    }
+                    Task { await refreshLoanDetailData() }
                 }
         }
         .sheet(isPresented: $showAgreementSheet) {
@@ -215,7 +223,7 @@ struct LoanDetailView: View {
                     }
                 }
                 .task {
-                    await fetchLenderName()
+                    lenderName = await resolveLenderName()
                 }
             }
             .presentationDetents([.medium, .large])
@@ -280,8 +288,93 @@ struct LoanDetailView: View {
     }
     
     // MARK: - Components
-    
 
+    @MainActor
+    private func refreshLoanDetailData() async {
+        do {
+            try await loanManager.fetchLoans()
+            self.payments = try await loanManager.fetchPayments(for: liveLoan)
+        } catch {
+            print("Loan detail refresh error: \(error)")
+        }
+    }
+
+    @MainActor
+    private func refreshPaymentsOnly() async {
+        do {
+            self.payments = try await loanManager.fetchPayments(for: liveLoan)
+        } catch {
+            print("Payments refresh error: \(error)")
+        }
+    }
+
+    @MainActor
+    private func subscribeToPaymentsRealtime() async {
+        guard let loanId = liveLoan.id else { return }
+        await unsubscribeFromPaymentsRealtime()
+
+        let channel = supabase.realtimeV2.channel("public:payments:\(loanId.uuidString)")
+        let changes = channel.postgresChange(
+            AnyAction.self,
+            schema: "public",
+            table: "payments"
+        )
+
+        paymentsRealtimeTask = Task {
+            for await change in changes {
+                if Task.isCancelled { break }
+                if Self.isPaymentChange(change, for: loanId) {
+                    await refreshPaymentsOnly()
+                }
+            }
+        }
+
+        do {
+            try await channel.subscribeWithError()
+            paymentsRealtimeChannel = channel
+        } catch {
+            print("Payments realtime subscribe error: \(error)")
+            paymentsRealtimeTask?.cancel()
+            paymentsRealtimeTask = nil
+        }
+    }
+
+    @MainActor
+    private func unsubscribeFromPaymentsRealtime() async {
+        paymentsRealtimeTask?.cancel()
+        paymentsRealtimeTask = nil
+        if let channel = paymentsRealtimeChannel {
+            await channel.unsubscribe()
+            paymentsRealtimeChannel = nil
+        }
+    }
+
+    private static func isPaymentChange(_ change: AnyAction, for loanId: UUID) -> Bool {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        switch change {
+        case .insert(let action):
+            guard let payment = try? action.decodeRecord(as: Payment.self, decoder: decoder) else { return false }
+            return payment.loan_id == loanId
+        case .update(let action):
+            guard let payment = try? action.decodeRecord(as: Payment.self, decoder: decoder) else { return false }
+            return payment.loan_id == loanId
+        case .delete(let action):
+            let oldRecord = action.oldRecord
+            guard let data = try? JSONEncoder().encode(oldRecord),
+                  let deleted = try? decoder.decode(DeletedPaymentRecord.self, from: data) else {
+                return true
+            }
+            return deleted.loan_id == nil || deleted.loan_id == loanId
+        }
+    }
+
+    private struct DeletedPaymentRecord: Decodable {
+        let loan_id: UUID?
+    }
+
+    
     
     @ViewBuilder
     var actionSection: some View {
@@ -489,26 +582,23 @@ struct LoanDetailView: View {
                     .italic()
                     .padding(.vertical)
             } else {
-                ForEach(payments) { payment in
-                    PaymentRow(payment: payment)
-                        .padding()
-                        .lsCardContainer()
-                        .onTapGesture {
-                            selectedPayment = payment
-                        }
+                LazyVStack(spacing: 12) {
+                    ForEach(payments) { payment in
+                        PaymentRow(payment: payment)
+                            .padding()
+                            .lsCardContainer()
+                            .onTapGesture {
+                                selectedPayment = payment
+                            }
+                    }
                 }
             }
         }
     }
-    private func fetchLenderName() async {
+    private func resolveLenderName() async -> String {
         if isLender {
-            lenderName = authManager.currentUserProfile?.fullName ?? "Me"
-        } else {
-            if let name = await authManager.fetchProfileName(for: liveLoan.lender_id) {
-                lenderName = name
-            } else {
-                lenderName = "Unknown"
-            }
+            return authManager.currentUserProfile?.fullName ?? "Me"
         }
+        return await authManager.fetchProfileName(for: liveLoan.lender_id) ?? "Unknown"
     }
 }

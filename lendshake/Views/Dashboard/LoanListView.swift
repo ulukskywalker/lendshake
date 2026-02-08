@@ -18,9 +18,18 @@ struct LoanListView: View {
     var visibleLoans: [Loan] {
         loanManager.loans
     }
+    
+    var attentionLoans: [Loan] {
+        visibleLoans.filter { loanManager.requiredActionLabel(for: $0) != nil }
+    }
+    
+    var attentionLoanIDs: Set<UUID> {
+        Set(attentionLoans.compactMap(\.id))
+    }
 
     var lendingLoans: [Loan] {
         visibleLoans.filter {
+            !isAttentionLoan($0) &&
             loanManager.isLender(of: $0) &&
             ($0.status == .active || $0.status == .sent || $0.status == .approved || $0.status == .funding_sent)
         }
@@ -28,17 +37,26 @@ struct LoanListView: View {
     
     var borrowingLoans: [Loan] {
         visibleLoans.filter {
+            !isAttentionLoan($0) &&
             !loanManager.isLender(of: $0) &&
             ($0.status == .active || $0.status == .sent || $0.status == .approved || $0.status == .funding_sent)
         }
     }
     
     var draftLoans: [Loan] {
-        visibleLoans.filter { $0.status == .draft }
+        visibleLoans.filter { !isAttentionLoan($0) && $0.status == .draft }
     }
     
     var historyLoans: [Loan] {
-        visibleLoans.filter { $0.status == .completed || $0.status == .forgiven || $0.status == .cancelled }
+        visibleLoans.filter {
+            !isAttentionLoan($0) &&
+            ($0.status == .completed || $0.status == .forgiven || $0.status == .cancelled)
+        }
+    }
+    
+    func isAttentionLoan(_ loan: Loan) -> Bool {
+        guard let loanId = loan.id else { return false }
+        return attentionLoanIDs.contains(loanId)
     }
     
     var body: some View {
@@ -60,6 +78,22 @@ struct LoanListView: View {
                     .listRowSeparator(.hidden)
                     .padding(.top, 40)
             } else {
+                if !attentionLoans.isEmpty {
+                    Section {
+                        ForEach(attentionLoans) { loan in
+                            loanRow(for: loan)
+                        }
+                    } header: {
+                        HStack {
+                            Image(systemName: "exclamationmark.circle.fill")
+                            Text("Needs Attention")
+                        }
+                        .foregroundStyle(.red)
+                        .font(.headline)
+                        .textCase(nil)
+                        .padding(.vertical, 8)
+                    }
+                }
                 
                 // 1. LENDING SECTION (Green)
                 if !lendingLoans.isEmpty {
@@ -184,6 +218,7 @@ struct LoanCardView: View {
     let loan: Loan
     let isLender: Bool
     @Environment(AuthManager.self) var authManager
+    @Environment(LoanManager.self) var loanManager
     @State private var fetchedLenderName: String?
     
     // Theme Colors based on Role
@@ -251,6 +286,10 @@ struct LoanCardView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                
+                if let attentionLabel = loanManager.requiredActionLabel(for: loan) {
+                    LoanAttentionBadge(text: attentionLabel)
+                }
             }
             
             Spacer()
@@ -279,12 +318,27 @@ struct LoanCardView: View {
         }
         .padding(.vertical, 4) // Reduced padding for standard list feel
         .contentShape(Rectangle())
-        .task {
+        .task(id: loan.lender_id) {
             if !isLender {
                 if let name = await authManager.fetchProfileName(for: loan.lender_id) {
                     fetchedLenderName = name
                 }
             }
+        }
+    }
+}
+
+private struct LoanAttentionBadge: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(.red)
+                .frame(width: 7, height: 7)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.red)
         }
     }
 }

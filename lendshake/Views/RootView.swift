@@ -9,6 +9,8 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AuthManager.self) var authManager
+    @Environment(NotificationManager.self) var notificationManager
+    @AppStorage("notifications.prompted.on.launch") private var didPromptForNotifications = false
     
     var body: some View {
         Group {
@@ -25,6 +27,11 @@ struct RootView: View {
             } else {
                 WelcomeView()
             }
+        }
+        .task {
+            guard !didPromptForNotifications else { return }
+            _ = await notificationManager.requestAuthorizationIfNeeded()
+            didPromptForNotifications = true
         }
     }
 }
@@ -58,4 +65,5 @@ private struct SplashLoadingView: View {
 #Preview {
     RootView()
         .environment(AuthManager())
+        .environment(NotificationManager.shared)
 }

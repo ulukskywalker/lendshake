@@ -17,6 +17,9 @@ class AuthManager {
     var awaitingEmailConfirmation: Bool = false
     var isProfileComplete: Bool = false
     var currentUserProfile: UserProfile?
+    private var profileNameCache: [UUID: String] = [:]
+    private var missingProfileNameIDs: Set<UUID> = []
+    private var inFlightProfileNameTasks: [UUID: Task<String?, Never>] = [:]
     var currentUserEmail: String? {
         supabase.auth.currentUser?.email
     }
@@ -28,8 +31,6 @@ class AuthManager {
         let residence_state: String? // Added state
         let phone_number: String? // Added phone number
         let updated_at: Date?
-        let reminder_enabled: Bool?
-        let next_reminder_at: Date?
         
         var fullName: String {
             [first_name, last_name].compactMap { $0 }.joined(separator: " ")
@@ -88,16 +89,42 @@ class AuthManager {
     }
     
     func fetchProfileName(for userId: UUID) async -> String? {
-        do {
-            let profile: UserProfile = try await supabase
-                .from("profiles")
-                .select("first_name, last_name")
-                .eq("id", value: userId)
-                .single()
-                .execute()
-                .value
-            return profile.fullName.isEmpty ? nil : profile.fullName
-        } catch {
+        if let cached = profileNameCache[userId] {
+            return cached
+        }
+        if missingProfileNameIDs.contains(userId) {
+            return nil
+        }
+        if let task = inFlightProfileNameTasks[userId] {
+            return await task.value
+        }
+
+        let task = Task<String?, Never> {
+            do {
+                let profile: UserProfile = try await supabase
+                    .from("profiles")
+                    .select("first_name, last_name")
+                    .eq("id", value: userId)
+                    .single()
+                    .execute()
+                    .value
+
+                let fullName = profile.fullName.trimmingCharacters(in: .whitespacesAndNewlines)
+                return fullName.isEmpty ? nil : fullName
+            } catch {
+                return nil
+            }
+        }
+
+        inFlightProfileNameTasks[userId] = task
+        let resolvedName = await task.value
+        inFlightProfileNameTasks[userId] = nil
+
+        if let resolvedName {
+            profileNameCache[userId] = resolvedName
+            return resolvedName
+        } else {
+            missingProfileNameIDs.insert(userId)
             return nil
         }
     }
@@ -131,33 +158,9 @@ class AuthManager {
         try await checkProfile()
     }
 
-    func updateReminderSettings(enabled: Bool, nextReminderAt: Date?) async throws {
-        guard let user = supabase.auth.currentUser else { return }
-
-        struct ReminderUpdate: Encodable {
-            let id: UUID
-            let reminder_enabled: Bool
-            let next_reminder_at: Date?
-            let updated_at: Date
-        }
-
-        let update = ReminderUpdate(
-            id: user.id,
-            reminder_enabled: enabled,
-            next_reminder_at: enabled ? nextReminderAt : nil,
-            updated_at: Date()
-        )
-
-        try await supabase
-            .from("profiles")
-            .upsert(update)
-            .execute()
-
-        try await checkProfile()
-    }
-    
     func signOut() async throws {
         try await supabase.auth.signOut()
+        await NotificationManager.shared.clearManagedNotifications()
         self.isAuthenticated = false
         self.isProfileComplete = false
         self.currentUserProfile = nil

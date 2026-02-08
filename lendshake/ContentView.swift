@@ -8,12 +8,15 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(LoanManager.self) var loanManager
+
     var body: some View {
         TabView {
             DashboardView()
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
                 }
+                .badge(loanManager.requiredActionCount)
             
             SettingsView()
                 .tabItem {

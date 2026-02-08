@@ -16,6 +16,7 @@ extension LoanManager {
         guard let loanId = loan.id else { return }
         guard let feeAmount = loan.lateFeeAmount, feeAmount > 0 else { return }
         let now = Date()
+        var didMutateLoanState = false
 
         let existingPayments = try await fetchPayments(for: loan)
         let missingFeesCount = LoanMath.calculateMissingLateFees(for: loan, existingPayments: existingPayments)
@@ -39,10 +40,12 @@ extension LoanManager {
         }
 
         if !feesToAdd.isEmpty {
-            for var fee in feesToAdd {
-                fee.status = .approved
-                try await supabase.from("payments").insert(fee).execute()
+            let approvedFees = feesToAdd.map { fee in
+                var mutableFee = fee
+                mutableFee.status = .approved
+                return mutableFee
             }
+            try await supabase.from("payments").insert(approvedFees).execute()
 
             let currentBalance = loan.remaining_balance ?? loan.principal_amount
             let newBalance = currentBalance + balanceIncrease
@@ -52,19 +55,21 @@ extension LoanManager {
                 .update(BalanceOnlyUpdate(remaining_balance: newBalance))
                 .eq("id", value: loanId)
                 .execute()
-
-            try await fetchLoans()
+            didMutateLoanState = true
         }
 
-        try await checkInterest(for: loan)
+        let addedInterest = try await checkInterest(for: loan)
+        if didMutateLoanState || addedInterest {
+            try await fetchLoans()
+        }
     }
 
-    private func checkInterest(for loan: Loan) async throws {
-        guard loan.status == .active else { return }
-        guard let loanId = loan.id else { return }
+    private func checkInterest(for loan: Loan) async throws -> Bool {
+        guard loan.status == .active else { return false }
+        guard let loanId = loan.id else { return false }
 
         if loan.interest_type == .fixed {
-            guard loan.interest_rate > 0 else { return }
+            guard loan.interest_rate > 0 else { return false }
 
             let existingPayments = try await fetchPayments(for: loan)
             let hasInterest = existingPayments.contains { $0.type == .interest }
@@ -89,12 +94,12 @@ extension LoanManager {
                     .update(BalanceOnlyUpdate(remaining_balance: newBalance))
                     .eq("id", value: loanId)
                     .execute()
-
-                try await fetchLoans()
+                return true
             }
+            return false
 
         } else {
-            guard loan.interest_rate > 0 else { return }
+            guard loan.interest_rate > 0 else { return false }
             let now = Date()
             let existingPayments = try await fetchPayments(for: loan)
             let (missingCount, monthlyAmount) = LoanMath.calculateMissingInterest(for: loan, existingPayments: existingPayments)
@@ -118,10 +123,12 @@ extension LoanManager {
             }
 
             if !interestToAdd.isEmpty {
-                for var payment in interestToAdd {
-                    payment.status = .approved
-                    try await supabase.from("payments").insert(payment).execute()
+                let approvedInterest = interestToAdd.map { payment in
+                    var mutablePayment = payment
+                    mutablePayment.status = .approved
+                    return mutablePayment
                 }
+                try await supabase.from("payments").insert(approvedInterest).execute()
 
                 let currentBalance = loan.remaining_balance ?? loan.principal_amount
                 let newBalance = currentBalance + balanceIncrease
@@ -131,9 +138,9 @@ extension LoanManager {
                     .update(BalanceOnlyUpdate(remaining_balance: newBalance))
                     .eq("id", value: loanId)
                     .execute()
-
-                try await fetchLoans()
+                return true
             }
+            return false
         }
     }
 }

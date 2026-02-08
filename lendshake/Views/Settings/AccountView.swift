@@ -14,8 +14,6 @@ struct AccountView: View {
     @State private var lastName = ""
     @State private var selectedState = "IL"
     @State private var phoneNumber = ""
-    @State private var reminderEnabled = false
-    @State private var nextReminderAt = Date()
     @State private var isEditing = false
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -77,23 +75,6 @@ struct AccountView: View {
 
                 if let email = authManager.currentUserEmail {
                     LabeledContent("Email", value: email)
-                }
-            }
-
-            Section("Reminders") {
-                Toggle("Payment Reminders", isOn: $reminderEnabled)
-                    .disabled(!isEditing || isSaving)
-                    .opacity(isEditing ? 1 : 0.65)
-
-                if reminderEnabled {
-                    DatePicker(
-                        "Next Reminder",
-                        selection: $nextReminderAt,
-                        in: Date()...,
-                        displayedComponents: [.date, .hourAndMinute]
-                    )
-                    .disabled(!isEditing || isSaving)
-                    .opacity(isEditing ? 1 : 0.65)
                 }
             }
 
@@ -171,8 +152,6 @@ struct AccountView: View {
             ? (profile.residence_state ?? "IL")
             : "IL"
         phoneNumber = profile.phone_number ?? ""
-        reminderEnabled = profile.reminder_enabled ?? false
-        nextReminderAt = profile.next_reminder_at ?? defaultNextReminderDate()
     }
 
     private func saveProfile() async {
@@ -218,10 +197,6 @@ struct AccountView: View {
                 state: selectedState,
                 phoneNumber: normalizedPhone
             )
-            try await authManager.updateReminderSettings(
-                enabled: reminderEnabled,
-                nextReminderAt: reminderEnabled ? nextReminderAt : nil
-            )
             firstName = normalizedFirst
             lastName = normalizedLast
             phoneNumber = normalizedPhone
@@ -230,14 +205,6 @@ struct AccountView: View {
         } catch {
             errorMessage = "Failed to save profile: \(error.localizedDescription)"
         }
-    }
-
-    private func defaultNextReminderDate() -> Date {
-        let calendar = Calendar.current
-        var components = calendar.dateComponents([.year, .month, .day], from: Date().addingTimeInterval(24 * 60 * 60))
-        components.hour = 9
-        components.minute = 0
-        return calendar.date(from: components) ?? Date().addingTimeInterval(24 * 60 * 60)
     }
 }
 
