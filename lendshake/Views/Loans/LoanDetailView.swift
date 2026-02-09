@@ -10,6 +10,7 @@ import Supabase
 
 struct LoanDetailView: View {
     let loan: Loan
+    let initialSelectedPaymentID: UUID?
     @Environment(LoanManager.self) var loanManager
     @Environment(AuthManager.self) var authManager
     @Environment(\.dismiss) var dismiss
@@ -23,6 +24,8 @@ struct LoanDetailView: View {
     @State private var showDeleteDraftAlert: Bool = false
     @State private var showCancelAlert: Bool = false
     @State private var showRejectAlert: Bool = false
+    @State private var showAgreementRejectionReasonSheet: Bool = false
+    @State private var agreementRejectionReason: String = ""
     
     @State private var showAgreementSheet: Bool = false
     @State private var showProofSheet: Bool = false
@@ -38,6 +41,7 @@ struct LoanDetailView: View {
     @State private var paymentsRealtimeChannel: RealtimeChannelV2?
     @State private var paymentsRealtimeTask: Task<Void, Never>?
     @State private var didSubmitPaymentSheet: Bool = false
+    @State private var didApplyInitialPaymentSelection: Bool = false
 
 
     
@@ -48,6 +52,11 @@ struct LoanDetailView: View {
     
     var isLender: Bool {
         loanManager.isLender(of: liveLoan)
+    }
+
+    init(loan: Loan, initialSelectedPaymentID: UUID? = nil) {
+        self.loan = loan
+        self.initialSelectedPaymentID = initialSelectedPaymentID
     }
     
     var body: some View {
@@ -115,8 +124,12 @@ struct LoanDetailView: View {
             async let fetchedPayments = loanManager.fetchPayments(for: liveLoan)
             async let fetchedLenderName = resolveLenderName()
 
-            if let refreshedPayments = try? await fetchedPayments {
+            do {
+                let refreshedPayments = try await fetchedPayments
                 payments = refreshedPayments
+                applyInitialPaymentSelectionIfNeeded(from: refreshedPayments)
+            } catch {
+                print("Failed to load payments: \(error)")
             }
             lenderName = await fetchedLenderName
             await subscribeToPaymentsRealtime()
@@ -205,6 +218,14 @@ struct LoanDetailView: View {
                         LabeledContent("Lender", value: liveLoan.lender_name_snapshot ?? lenderName)
                         LabeledContent("Borrower", value: liveLoan.borrower_name_snapshot ?? liveLoan.borrower_name ?? "Unknown")
                     }
+                    if liveLoan.status == .cancelled,
+                       let reason = liveLoan.agreement_rejection_reason?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !reason.isEmpty {
+                        Section("Rejection") {
+                            Text(reason)
+                                .font(.body)
+                        }
+                    }
                 }
                 .navigationTitle("Loan Terms")
                 .toolbar {
@@ -235,6 +256,37 @@ struct LoanDetailView: View {
         }
         .sheet(isPresented: $showFundingSheet) {
             FundingSheet(loan: liveLoan, isPresented: $showFundingSheet)
+        }
+        .sheet(isPresented: $showAgreementRejectionReasonSheet) {
+            NavigationStack {
+                Form {
+                    Section("Reason") {
+                        TextField("Why are you rejecting?", text: $agreementRejectionReason, axis: .vertical)
+                            .lineLimit(3...6)
+                    }
+                    Section {
+                        Button {
+                            Task { await submitAgreementRejection() }
+                        } label: {
+                            Text("Submit Rejection")
+                                .lsDestructiveButton()
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(agreementRejectionReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                .navigationTitle("Rejection Reason")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showAgreementRejectionReasonSheet = false
+                            agreementRejectionReason = ""
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
         }
         // Alerts...
         .alert("Error", isPresented: $showError) {
@@ -270,27 +322,13 @@ struct LoanDetailView: View {
             .alert("Cancel Request?", isPresented: $showCancelAlert) {
                 Button("Keep Loan", role: .cancel) { }
                 Button("Cancel Loan", role: .destructive) {
-                    Task {
-                        do {
-                            try await loanManager.transitionLoanStatus(liveLoan, status: .cancelled)
-                        } catch {
-                            errorMsg = loanManager.friendlyTransitionErrorMessage(error)
-                            showError = true
-                        }
-                    }
+                    showAgreementRejectionReasonSheet = true
                 }
             } message: { Text("This will cancel the loan and stop the signature process.") }
             .alert("Reject Agreement?", isPresented: $showRejectAlert) {
                 Button("Keep Reviewing", role: .cancel) { }
                 Button("Reject Loan", role: .destructive) {
-                    Task {
-                        do {
-                            try await loanManager.transitionLoanStatus(liveLoan, status: .cancelled)
-                        } catch {
-                            errorMsg = loanManager.friendlyTransitionErrorMessage(error)
-                            showError = true
-                        }
-                    }
+                    showAgreementRejectionReasonSheet = true
                 }
             } message: { Text("This will reject the agreement and cancel this loan request.") }
 
@@ -303,7 +341,9 @@ struct LoanDetailView: View {
     private func refreshLoanDetailData() async {
         do {
             try await loanManager.fetchLoans()
-            self.payments = try await loanManager.fetchPayments(for: liveLoan)
+            let refreshed = try await loanManager.fetchPayments(for: liveLoan)
+            self.payments = refreshed
+            applyInitialPaymentSelectionIfNeeded(from: refreshed)
         } catch {
             print("Loan detail refresh error: \(error)")
         }
@@ -312,10 +352,23 @@ struct LoanDetailView: View {
     @MainActor
     private func refreshPaymentsOnly() async {
         do {
-            self.payments = try await loanManager.fetchPayments(for: liveLoan)
+            let refreshed = try await loanManager.fetchPayments(for: liveLoan)
+            self.payments = refreshed
+            applyInitialPaymentSelectionIfNeeded(from: refreshed)
         } catch {
             print("Payments refresh error: \(error)")
         }
+    }
+
+    private func applyInitialPaymentSelectionIfNeeded(from currentPayments: [Payment]) {
+        guard !didApplyInitialPaymentSelection else { return }
+        guard let targetPaymentID = initialSelectedPaymentID else {
+            didApplyInitialPaymentSelection = true
+            return
+        }
+        guard let targetPayment = currentPayments.first(where: { $0.id == targetPaymentID }) else { return }
+        selectedPayment = targetPayment
+        didApplyInitialPaymentSelection = true
     }
 
     @MainActor
@@ -417,12 +470,7 @@ struct LoanDetailView: View {
                 showAgreementSheet = true
             } label: {
                 Text("Review & Sign Agreement")
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.lsPrimary)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .lsPrimaryButton()
             }
         } else {
             Text("Waiting for signatures...")
@@ -438,24 +486,14 @@ struct LoanDetailView: View {
                     showAgreementSheet = true
                 } label: {
                     Text("Review & Accept Loan")
-                        .bold()
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.lsPrimary)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .lsPrimaryButton()
                 }
 
                 Button {
                     showRejectAlert = true
                 } label: {
                     Text("Reject Agreement")
-                        .bold()
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red.opacity(0.1))
-                        .foregroundColor(.red)
-                        .cornerRadius(12)
+                        .lsDestructiveButton()
                 }
             }
         } else if isLender {
@@ -467,12 +505,7 @@ struct LoanDetailView: View {
                     showCancelAlert = true
                 } label: {
                     Text("Cancel Request")
-                        .bold()
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red.opacity(0.1))
-                        .foregroundColor(.red)
-                        .cornerRadius(12)
+                        .lsDestructiveButton()
                 }
             }
         } else {
@@ -491,12 +524,7 @@ struct LoanDetailView: View {
                     Image(systemName: "paperplane.fill")
                     Text("I Have Sent the Money")
                 }
-                .bold()
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(12)
+                .lsPrimaryButton(background: .green)
             }
         } else {
             HStack {
@@ -540,12 +568,7 @@ struct LoanDetailView: View {
                     Image(systemName: "checkmark.seal.fill")
                     Text("Confirm I Received Money")
                 }
-                .bold()
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.green)
-                .foregroundColor(.white)
-                .cornerRadius(12)
+                .lsPrimaryButton(background: .green)
             }
         }
     }
@@ -557,12 +580,7 @@ struct LoanDetailView: View {
                 showPaymentSheet = true
             } label: {
                 Text("Record Payment")
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.lsPrimary)
-                    .foregroundStyle(.white)
-                    .cornerRadius(12)
+                    .lsPrimaryButton()
             }
         }
     }
@@ -576,12 +594,7 @@ struct LoanDetailView: View {
                 Image(systemName: "checkmark.seal")
                 Text("View Release Document")
             }
-            .bold()
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.gray.opacity(0.1))
-            .foregroundColor(.primary)
-            .cornerRadius(12)
+            .lsSecondaryButton()
         }
     }
 
@@ -599,7 +612,7 @@ struct LoanDetailView: View {
             } else {
                 LazyVStack(spacing: 12) {
                     ForEach(payments) { payment in
-                        PaymentRow(payment: payment)
+                        PaymentRow(payment: payment, isLender: isLender)
                             .padding()
                             .lsCardContainer()
                             .onTapGesture {
@@ -615,5 +628,28 @@ struct LoanDetailView: View {
             return authManager.currentUserProfile?.fullName ?? "Me"
         }
         return await authManager.fetchProfileName(for: liveLoan.lender_id) ?? "Unknown"
+    }
+
+    @MainActor
+    private func submitAgreementRejection() async {
+        let trimmedReason = agreementRejectionReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedReason.isEmpty else {
+            errorMsg = "Please provide a rejection reason."
+            showError = true
+            return
+        }
+
+        do {
+            try await loanManager.transitionLoanStatus(
+                liveLoan,
+                status: .cancelled,
+                reason: trimmedReason
+            )
+            showAgreementRejectionReasonSheet = false
+            agreementRejectionReason = ""
+        } catch {
+            errorMsg = loanManager.friendlyTransitionErrorMessage(error)
+            showError = true
+        }
     }
 }

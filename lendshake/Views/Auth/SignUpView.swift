@@ -41,13 +41,11 @@ struct SignUpView: View {
             } label: {
                 if isLoading {
                     ProgressView()
+                        .tint(.white)
+                        .lsPrimaryButton(background: .green)
                 } else {
                     Text("Sign Up")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.green)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
+                        .lsPrimaryButton(background: .green)
                 }
             }
             .disabled(isLoading || email.isEmpty || password.isEmpty)

@@ -67,18 +67,22 @@ struct PaymentSheet: View {
                 
                 Section {
                     if isLoading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
+                        HStack {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        .lsPrimaryButton()
                     } else {
                         Button {
                             submit()
                         } label: {
                             Text("Submit Payment")
-                                .frame(maxWidth: .infinity)
-                                .bold()
+                                .lsPrimaryButton()
                         }
+                        .buttonStyle(.plain)
                     }
                 }
+                .listRowBackground(Color.clear)
                 
                 if let errorMsg {
                     Section {

@@ -97,15 +97,20 @@ struct AccountView: View {
                         Task { await saveProfile() }
                     } label: {
                         if isSaving {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
+                            HStack {
+                                ProgressView()
+                                    .tint(.white)
+                            }
+                            .lsPrimaryButton()
                         } else {
                             Text("Save")
-                                .frame(maxWidth: .infinity)
+                                .lsPrimaryButton()
                         }
                     }
+                    .buttonStyle(.plain)
                     .disabled(isSaving)
                 }
+                .listRowBackground(Color.clear)
             }
         }
         .listStyle(.insetGrouped)

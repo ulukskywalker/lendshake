@@ -9,6 +9,7 @@ import SwiftUI
 
 struct PaymentRow: View {
     let payment: Payment
+    let isLender: Bool
     
     var body: some View {
         HStack(spacing: 12) {
@@ -86,16 +87,28 @@ struct PaymentRow: View {
                             .font(.headline)
                     }
                     
-                    HStack(spacing: 4) {
-                        Text(payment.date.formatted(date: .abbreviated, time: .shortened))
-                        
-                        if payment.proof_url != nil {
-                            Image(systemName: "paperclip")
-                                .font(.caption2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 4) {
+                            Text(payment.date.formatted(date: .abbreviated, time: .shortened))
+
+                            if payment.proof_url != nil {
+                                Image(systemName: "paperclip")
+                                    .font(.caption2)
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if payment.status == .rejected {
+                            let reason = payment.rejection_reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                            Text(reason.isEmpty
+                                 ? (isLender ? "You rejected this payment." : "Lender rejected this payment.")
+                                 : "Rejected: \(reason)")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .lineLimit(2)
                         }
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                     .padding(.leading, 26)
                 }
                 

@@ -99,4 +99,55 @@ extension View {
     func lsToast(message: Binding<String?>, style: LSToastStyle, duration: TimeInterval = 3) -> some View {
         modifier(LSToastModifier(message: message, style: style, duration: duration))
     }
+
+    func lsPrimaryButton(background: Color = .lsPrimary) -> some View {
+        self
+            .font(.headline)
+            .fontWeight(.semibold)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 48)
+            .foregroundStyle(.white)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(background)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(background.opacity(0.15), lineWidth: 1)
+            )
+    }
+
+    func lsSecondaryButton() -> some View {
+        self
+            .font(.headline)
+            .fontWeight(.semibold)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 48)
+            .foregroundStyle(.primary)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(uiColor: .separator).opacity(0.3), lineWidth: 1)
+            )
+    }
+
+    func lsDestructiveButton() -> some View {
+        self
+            .font(.headline)
+            .fontWeight(.semibold)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 48)
+            .foregroundStyle(.red)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.red.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.red.opacity(0.25), lineWidth: 1)
+            )
+    }
 }

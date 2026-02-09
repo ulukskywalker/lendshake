@@ -12,6 +12,8 @@ import Observation
 @MainActor
 @Observable
 class AuthManager {
+    private let logger = AppLogger(.auth)
+
     var isAuthenticated: Bool = false
     var isLoading: Bool = true
     var awaitingEmailConfirmation: Bool = false
@@ -81,8 +83,7 @@ class AuthManager {
                 self.isProfileComplete = false
             }
         } catch {
-            // Profile row typically auto-created by triggers, or might not exist.
-            print("Profile check error: \(error)")
+            logger.warning("Profile check failed: \(error.localizedDescription)")
             self.isProfileComplete = false
             self.currentUserProfile = nil
         }
@@ -177,8 +178,31 @@ class AuthManager {
             _ = try await supabase.auth.signUp(email: email, password: password)
             self.awaitingEmailConfirmation = true
         } catch {
-            print("DEBUG: Sign Up Error: \(error)")
+            await AlertReporter.shared.capture(
+                error: error,
+                category: .auth,
+                summary: "User sign up failed",
+                severity: .warning,
+                metadata: ["email_domain": email.components(separatedBy: "@").last ?? "unknown"]
+            )
             throw error
+        }
+    }
+
+    func handleAuthCallback(url: URL) async -> Bool {
+        guard let host = url.host?.lowercased(), host == "auth" else { return false }
+        let path = url.path.lowercased()
+        guard path.contains("callback") else { return false }
+
+        do {
+            _ = try await supabase.auth.session(from: url)
+            awaitingEmailConfirmation = false
+            isAuthenticated = true
+            try await checkProfile()
+            return true
+        } catch {
+            logger.warning("Auth callback handling failed: \(error.localizedDescription)")
+            return false
         }
     }
 }

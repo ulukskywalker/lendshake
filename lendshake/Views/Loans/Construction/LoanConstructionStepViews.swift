@@ -12,7 +12,6 @@ struct LoanConstructionAmountStep: View {
     let principalFocus: FocusState<Bool>.Binding
     let amountInputFontSize: CGFloat
     let amountShakeTrigger: CGFloat
-    let onPrincipalChange: (String) -> Void
     let onTapAmount: () -> Void
 
     var body: some View {
@@ -36,9 +35,6 @@ struct LoanConstructionAmountStep: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(1)
                     .frame(minWidth: 80, maxWidth: 220)
-                    .onChange(of: principalAmount) { _, newValue in
-                        onPrincipalChange(newValue)
-                    }
             }
             .modifier(ShakeEffect(animatableData: amountShakeTrigger))
             .contentShape(Rectangle())

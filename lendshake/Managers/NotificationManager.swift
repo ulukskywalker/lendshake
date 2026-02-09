@@ -13,6 +13,7 @@ import UserNotifications
 @Observable
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
+    private let logger = AppLogger(.notifications)
 
     private let center = UNUserNotificationCenter.current()
     private let managedPrefix = "loan.event."
@@ -65,7 +66,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         center.removePendingNotificationRequests(withIdentifiers: ids)
     }
 
-    func postEventNotification(eventID: String, title: String, body: String) async {
+    func postEventNotification(eventID: String, title: String, body: String, deepLink: String? = nil) async {
         await refreshAuthorizationStatus()
 
         guard actionNotificationsEnabled, notificationsEnabledInSystem else { return }
@@ -74,6 +75,9 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         content.title = title
         content.body = body
         content.sound = .default
+        if let deepLink, !deepLink.isEmpty {
+            content.userInfo["deep_link"] = deepLink
+        }
 
         let request = UNNotificationRequest(
             identifier: managedPrefix + eventID,
@@ -85,7 +89,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         do {
             try await add(request: request)
         } catch {
-            print("Notification post error (\(request.identifier)): \(error)")
+            logger.warning("Notification post failed (\(request.identifier)): \(error.localizedDescription)")
         }
     }
 
@@ -115,5 +119,21 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([.banner, .list, .sound])
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+        if let deepLink = userInfo["deep_link"] as? String, let url = URL(string: deepLink) {
+            Task { @MainActor in
+                AppRouter.shared.handle(url: url)
+                completionHandler()
+            }
+            return
+        }
+        completionHandler()
     }
 }

@@ -17,7 +17,7 @@ struct WelcomeView: View {
                     .font(.system(size: 80))
                     .foregroundStyle(.tint)
                 
-                Text("Lendscape")
+                Text("Lendshake")
                     .font(.largeTitle)
                     .fontWeight(.bold)
                 
@@ -32,22 +32,12 @@ struct WelcomeView: View {
                 VStack(spacing: 16) {
                     NavigationLink(destination: LoginView()) {
                         Text("Sign In")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
+                            .lsPrimaryButton()
                     }
                     
                     NavigationLink(destination: SignUpView()) {
                         Text("Create Account")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.gray.opacity(0.15))
-                            .foregroundColor(.primary)
-                            .cornerRadius(10)
+                            .lsSecondaryButton()
                     }
                 }
                 .padding(.horizontal, 30)

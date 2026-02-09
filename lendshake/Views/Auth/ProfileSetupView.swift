@@ -81,20 +81,19 @@ struct ProfileSetupView: View {
                     } label: {
                         if isLoading {
                             HStack {
-                                Spacer()
                                 ProgressView()
-                                Spacer()
+                                    .tint(.white)
                             }
+                            .lsPrimaryButton()
                         } else {
                             Text("Complete Setup")
-                                .frame(maxWidth: .infinity)
-                                .bold()
-                                .foregroundColor(.white)
+                                .lsPrimaryButton()
                         }
                     }
                     .disabled(isLoading)
-                    .listRowBackground(Color.blue)
+                    .buttonStyle(.plain)
                 }
+                .listRowBackground(Color.clear)
             }
             .navigationTitle("Your Profile")
             .interactiveDismissDisabled()

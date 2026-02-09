@@ -91,6 +91,7 @@ struct Payment: Codable, Identifiable, Hashable {
     var type: PaymentType // 'repayment' or 'funding'
     let created_at: Date?
     let proof_url: String?
+    var rejection_reason: String?
     
     init(loanId: UUID, amount: Double, date: Date, type: PaymentType = .repayment, proofURL: String? = nil) {
         self.id = nil
@@ -100,6 +101,7 @@ struct Payment: Codable, Identifiable, Hashable {
         self.status = .pending
         self.type = type
         self.proof_url = proofURL
+        self.rejection_reason = nil
         self.created_at = nil
     }
 }
@@ -129,6 +131,7 @@ struct Loan: Codable, Identifiable, Hashable {
     var borrower_signed_at: Date?
     var lender_ip: String?
     var borrower_ip: String?
+    var agreement_rejection_reason: String?
     
     // Phase 5 Closeout
     var release_document_text: String? // "Paid in Full" receipt
@@ -170,6 +173,7 @@ struct Loan: Codable, Identifiable, Hashable {
         self.borrower_signed_at = nil
         self.lender_ip = nil
         self.borrower_ip = nil
+        self.agreement_rejection_reason = nil
     }
     
     // MARK: - Payment Helpers

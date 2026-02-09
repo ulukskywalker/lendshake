@@ -35,11 +35,13 @@ struct LoanConstructionView: View {
                 switch vm.currentStep {
                 case .amount:
                     LoanConstructionAmountStep(
-                        principalAmount: $vm.principalAmount,
+                        principalAmount: Binding(
+                            get: { vm.principalAmount },
+                            set: { vm.sanitizePrincipalInput($0) }
+                        ),
                         principalFocus: $isPrincipalFieldFocused,
                         amountInputFontSize: vm.amountInputFontSize,
                         amountShakeTrigger: vm.amountShakeTrigger,
-                        onPrincipalChange: vm.sanitizePrincipalInput,
                         onTapAmount: { isPrincipalFieldFocused = true }
                     )
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))

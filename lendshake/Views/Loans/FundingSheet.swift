@@ -44,8 +44,12 @@ struct FundingSheet: View {
                     }
                     .onChange(of: selectedItem) { _, newItem in
                         Task {
-                            if let data = try? await newItem?.loadTransferable(type: Data.self) {
-                                selectedImageData = data
+                            do {
+                                if let data = try await newItem?.loadTransferable(type: Data.self) {
+                                    selectedImageData = data
+                                }
+                            } catch {
+                                errorMsg = "Failed to load selected image."
                             }
                         }
                     }
@@ -61,20 +65,22 @@ struct FundingSheet: View {
                 
                 Section {
                     if isLoading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
+                        HStack {
+                            ProgressView()
+                                .tint(.white)
+                        }
+                        .lsPrimaryButton(background: .green)
                     } else {
                         Button {
                             submit()
                         } label: {
                             Text("Confirm Funds Sent")
-                                .frame(maxWidth: .infinity)
-                                .bold()
-                                .foregroundStyle(.white)
+                                .lsPrimaryButton(background: .green)
                         }
-                        .listRowBackground(Color.green)
+                        .buttonStyle(.plain)
                     }
                 }
+                .listRowBackground(Color.clear)
                 
                 if let errorMsg {
                     Section {

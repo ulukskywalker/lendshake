@@ -13,6 +13,14 @@ struct SettingsView: View {
     
     @State private var actionNotificationsEnabled = false
     @State private var notificationError: String?
+    @State private var signOutError: String?
+    @State private var feedbackType: FeedbackType = .general
+    @State private var feedbackRating: Int = 5
+    @State private var feedbackMessage = ""
+    @State private var feedbackError: String?
+    @State private var feedbackSuccess: String?
+    @State private var isFeedbackSubmitting = false
+    @State private var isFeedbackSheetPresented = false
 
     var body: some View {
         NavigationStack {
@@ -40,11 +48,41 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Feedback") {
+                    Button("Send Feedback") {
+                        feedbackType = .general
+                        feedbackRating = 5
+                        feedbackMessage = ""
+                        feedbackError = nil
+                        isFeedbackSheetPresented = true
+                    }
+                }
+
+                if let feedbackSuccess {
+                    Section {
+                        Text(feedbackSuccess)
+                            .foregroundStyle(.green)
+                            .font(.footnote)
+                    }
+                }
+
                 Section {
                     Button("Log Out", role: .destructive) {
                         Task {
-                            try? await authManager.signOut()
+                            do {
+                                try await authManager.signOut()
+                            } catch {
+                                signOutError = "Log out failed: \(error.localizedDescription)"
+                            }
                         }
+                    }
+                }
+
+                if let signOutError {
+                    Section {
+                        Text(signOutError)
+                            .foregroundStyle(.red)
+                            .font(.footnote)
                     }
                 }
             }
@@ -58,6 +96,69 @@ struct SettingsView: View {
             }
             .onChange(of: actionNotificationsEnabled) { _, newValue in
                 Task { await applyNotificationToggle(enabled: newValue) }
+            }
+            .sheet(isPresented: $isFeedbackSheetPresented) {
+                NavigationStack {
+                    Form {
+                        Section("Feedback Type") {
+                            Picker("Feedback Type", selection: $feedbackType) {
+                                ForEach(FeedbackType.allCases) { type in
+                                    Text(type.title).tag(type)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+
+                        Section("Rating") {
+                            HStack(spacing: 10) {
+                                ForEach(1...5, id: \.self) { star in
+                                    Button {
+                                        feedbackRating = star
+                                    } label: {
+                                        Image(systemName: star <= feedbackRating ? "star.fill" : "star")
+                                            .font(.title3)
+                                            .foregroundStyle(star <= feedbackRating ? Color.yellow : Color.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("\(star) star\(star == 1 ? "" : "s")")
+                                }
+                            }
+                        }
+
+                        Section("Message") {
+                            TextEditor(text: $feedbackMessage)
+                                .frame(minHeight: 120)
+                        }
+
+                        if let feedbackError {
+                            Section {
+                                Text(feedbackError)
+                                    .foregroundStyle(.red)
+                                    .font(.footnote)
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.lsBackground)
+                    .navigationTitle("Send Feedback")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") {
+                                isFeedbackSheetPresented = false
+                            }
+                            .disabled(isFeedbackSubmitting)
+                        }
+
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Submit") {
+                                Task { await submitFeedback() }
+                            }
+                            .disabled(isFeedbackSubmitting || feedbackMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                }
             }
         }
     }
@@ -98,6 +199,26 @@ struct SettingsView: View {
             return "Ephemeral"
         @unknown default:
             return "Unknown"
+        }
+    }
+
+    private func submitFeedback() async {
+        feedbackError = nil
+        let message = feedbackMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else {
+            feedbackError = "Please include a short message."
+            return
+        }
+
+        isFeedbackSubmitting = true
+        defer { isFeedbackSubmitting = false }
+
+        do {
+            try await ReviewManager.shared.submitFeedback(type: feedbackType, rating: feedbackRating, message: message)
+            feedbackSuccess = "Thanks. Your feedback was submitted."
+            isFeedbackSheetPresented = false
+        } catch {
+            feedbackError = "Could not submit feedback: \(error.localizedDescription)"
         }
     }
 }

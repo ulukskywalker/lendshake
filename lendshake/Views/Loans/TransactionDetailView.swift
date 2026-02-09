@@ -18,6 +18,8 @@ struct TransactionDetailView: View {
     @State private var isProcessing: Bool = false
     @State private var errorMessage: String?
     @State private var signedImageURL: URL?
+    @State private var showRejectReasonSheet: Bool = false
+    @State private var rejectionReason: String = ""
     
     var body: some View {
         NavigationStack {
@@ -48,6 +50,11 @@ struct TransactionDetailView: View {
                         
                         if let created = payment.created_at {
                             detailRow(label: "Recorded On", value: created.formatted(date: .numeric, time: .shortened))
+                        }
+                        if payment.status == .rejected,
+                           let reason = payment.rejection_reason?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           !reason.isEmpty {
+                            detailRow(label: "Rejection Reason", value: reason)
                         }
                     }
                     .padding()
@@ -133,32 +140,29 @@ struct TransactionDetailView: View {
                             
                             HStack(spacing: 16) {
                                 Button(role: .destructive) {
-                                    handleAction(approve: false)
+                                    showRejectReasonSheet = true
                                 } label: {
                                     Text("Reject")
-                                        .bold()
-                                        .frame(maxWidth: .infinity)
-                                        .padding()
-                                        .background(Color.red.opacity(0.1))
-                                        .foregroundStyle(.red)
-                                        .cornerRadius(12)
+                                        .lsDestructiveButton()
                                 }
                                 
                                 Button {
-                                    handleAction(approve: true)
+                                    handleApprove()
                                 } label: {
                                     Text("Confirm Received")
-                                        .bold()
-                                        .frame(maxWidth: .infinity)
-                                        .padding()
-                                        .background(Color.green)
-                                        .foregroundStyle(.white)
-                                        .cornerRadius(12)
+                                        .lsPrimaryButton(background: .green)
                                 }
                             }
                             .disabled(isProcessing)
                         }
                         .padding(.top)
+                    }
+
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding()
@@ -169,6 +173,37 @@ struct TransactionDetailView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $showRejectReasonSheet) {
+                NavigationStack {
+                    Form {
+                        Section("Reason") {
+                            TextField("Why are you rejecting this payment?", text: $rejectionReason, axis: .vertical)
+                                .lineLimit(3...6)
+                        }
+                        Section {
+                            Button {
+                                submitReject()
+                            } label: {
+                                Text("Reject Payment")
+                                    .lsDestructiveButton()
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(rejectionReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProcessing)
+                        }
+                        .listRowBackground(Color.clear)
+                    }
+                    .navigationTitle("Reject Payment")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") {
+                                showRejectReasonSheet = false
+                                rejectionReason = ""
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
             }
         }
     }
@@ -198,7 +233,7 @@ struct TransactionDetailView: View {
         }
     }
     
-    func handleAction(approve: Bool) {
+    func handleApprove() {
         guard !isProcessing else { return }
         isProcessing = true
         
@@ -206,7 +241,33 @@ struct TransactionDetailView: View {
             do {
                 try await loanManager.updatePaymentStatus(
                     payment: payment,
-                    newStatus: approve ? .approved : .rejected,
+                    newStatus: .approved,
+                    loan: loan
+                )
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+                isProcessing = false
+            }
+        }
+    }
+
+    func submitReject() {
+        guard !isProcessing else { return }
+        let trimmedReason = rejectionReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedReason.isEmpty else {
+            errorMessage = "Please provide a rejection reason."
+            return
+        }
+
+        isProcessing = true
+        Task {
+            do {
+                var paymentWithReason = payment
+                paymentWithReason.rejection_reason = trimmedReason
+                try await loanManager.updatePaymentStatus(
+                    payment: paymentWithReason,
+                    newStatus: .rejected,
                     loan: loan
                 )
                 dismiss()

@@ -16,7 +16,10 @@ alter table public.profiles drop column if exists next_reminder_at;
 alter table public.profiles enable row level security;
 
 create policy "Public Profiles" on profiles for select using (true);
-create policy "Manage Own Profile" on profiles for all using (auth.uid() = id);
+drop policy if exists "Manage Own Profile" on profiles;
+create policy "Manage Own Profile" on profiles for all
+using ((select auth.uid()) = id)
+with check ((select auth.uid()) = id);
 
 
 -- ==========================================
@@ -44,6 +47,7 @@ create table if not exists public.loans (
   
   -- Agreements
   agreement_text text,
+  agreement_rejection_reason text,
   release_document_text text, -- "Paid in Full" receipt
   lender_signed_at timestamptz,
   borrower_signed_at timestamptz,
@@ -54,16 +58,19 @@ create table if not exists public.loans (
 alter table public.loans enable row level security;
 
 create policy "View Loans" on loans for select using (
-  auth.uid() = lender_id or auth.uid() = borrower_id or borrower_email = (auth.jwt() ->> 'email')
+  (select auth.uid()) = lender_id
+  or (select auth.uid()) = borrower_id
+  or borrower_email = ((select auth.jwt()) ->> 'email')
 );
-create policy "Create Loans" on loans for insert with check (auth.uid() = lender_id);
+create policy "Create Loans" on loans for insert with check ((select auth.uid()) = lender_id);
 drop policy if exists "Update Loans" on loans;
 drop policy if exists "No Direct Loan Updates" on loans;
 create policy "No Direct Loan Updates" on loans for update using (false) with check (false);
-create policy "Delete Drafts" on loans for delete using (auth.uid() = lender_id and status = 'draft');
+create policy "Delete Drafts" on loans for delete using ((select auth.uid()) = lender_id and status = 'draft');
 
 alter table public.loans add column if not exists lender_name_snapshot text;
 alter table public.loans add column if not exists borrower_name_snapshot text;
+alter table public.loans add column if not exists agreement_rejection_reason text;
 
 create or replace function public.resolve_profile_full_name(p_user_id uuid)
 returns text
@@ -131,6 +138,124 @@ set
 where nullif(trim(coalesce(l.lender_name_snapshot, '')), '') is null
    or nullif(trim(coalesce(l.borrower_name_snapshot, '')), '') is null;
 
+-- 2.4 Loan invariants and immutable signed document fields
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'loans_status_check'
+      and conrelid = 'public.loans'::regclass
+  ) then
+    alter table public.loans
+      add constraint loans_status_check
+      check (status in ('draft', 'sent', 'approved', 'funding_sent', 'active', 'completed', 'forgiven', 'cancelled'));
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'loans_interest_type_check'
+      and conrelid = 'public.loans'::regclass
+  ) then
+    alter table public.loans
+      add constraint loans_interest_type_check
+      check (interest_type in ('percentage', 'fixed'));
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'loans_principal_amount_check'
+      and conrelid = 'public.loans'::regclass
+  ) then
+    alter table public.loans
+      add constraint loans_principal_amount_check
+      check (principal_amount > 0 and principal_amount <= 10000);
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'loans_interest_rate_check'
+      and conrelid = 'public.loans'::regclass
+  ) then
+    alter table public.loans
+      add constraint loans_interest_rate_check
+      check (interest_rate >= 0 and interest_rate <= 15);
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'loans_remaining_balance_check'
+      and conrelid = 'public.loans'::regclass
+  ) then
+    alter table public.loans
+      add constraint loans_remaining_balance_check
+      check (remaining_balance is null or remaining_balance >= 0);
+  end if;
+end;
+$$;
+
+create or replace function public.enforce_loan_signed_field_immutability()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op <> 'update' then
+    return new;
+  end if;
+
+  if old.lender_signed_at is not null and new.lender_signed_at is distinct from old.lender_signed_at then
+    raise exception 'lender_signed_at is immutable once set';
+  end if;
+
+  if old.borrower_signed_at is not null and new.borrower_signed_at is distinct from old.borrower_signed_at then
+    raise exception 'borrower_signed_at is immutable once set';
+  end if;
+
+  if nullif(trim(coalesce(old.lender_name_snapshot, '')), '') is not null
+     and new.lender_name_snapshot is distinct from old.lender_name_snapshot then
+    raise exception 'lender_name_snapshot is immutable once set';
+  end if;
+
+  if nullif(trim(coalesce(old.borrower_name_snapshot, '')), '') is not null
+     and new.borrower_name_snapshot is distinct from old.borrower_name_snapshot then
+    raise exception 'borrower_name_snapshot is immutable once set';
+  end if;
+
+  if nullif(trim(coalesce(old.agreement_text, '')), '') is not null
+     and new.agreement_text is distinct from old.agreement_text then
+    raise exception 'agreement_text is immutable once set';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_enforce_loan_signed_field_immutability on public.loans;
+create trigger trg_enforce_loan_signed_field_immutability
+before update on public.loans
+for each row execute function public.enforce_loan_signed_field_immutability();
+
+create index if not exists loans_status_idx on public.loans (status);
+create index if not exists loans_lender_status_idx on public.loans (lender_id, status);
+create index if not exists loans_borrower_status_idx on public.loans (borrower_id, status);
+
 -- 2.2 Immutable event log (audit trail)
 create table if not exists public.loan_events (
   id uuid primary key default gen_random_uuid(),
@@ -156,9 +281,9 @@ create policy "View Loan Events" on public.loan_events for select using (
     from public.loans l
     where l.id = loan_events.loan_id
       and (
-        l.lender_id = auth.uid()
-        or l.borrower_id = auth.uid()
-        or l.borrower_email = (auth.jwt() ->> 'email')
+        l.lender_id = (select auth.uid())
+        or l.borrower_id = (select auth.uid())
+        or l.borrower_email = ((select auth.jwt()) ->> 'email')
       )
   )
 );
@@ -358,7 +483,8 @@ $$;
 
 create or replace function public.transition_loan_status(
   p_loan_id uuid,
-  p_new_status text
+  p_new_status text,
+  p_reason text default null
 )
 returns public.loans
 language plpgsql
@@ -412,6 +538,9 @@ begin
       raise exception 'Invalid transition to forgiven';
     end if;
   elsif p_new_status = 'cancelled' then
+    if nullif(trim(coalesce(p_reason, '')), '') is null then
+      raise exception 'Rejection reason is required';
+    end if;
     if v_loan.status = 'sent' then
       null; -- lender can cancel request; borrower can reject request
     elsif v_loan.status = 'approved' and v_is_lender then
@@ -429,6 +558,12 @@ begin
           remaining_balance = 0
     where id = p_loan_id
     returning * into v_loan;
+  elsif p_new_status = 'cancelled' then
+    update public.loans
+      set status = p_new_status,
+          agreement_rejection_reason = nullif(trim(coalesce(p_reason, '')), '')
+    where id = p_loan_id
+    returning * into v_loan;
   else
     update public.loans
       set status = p_new_status
@@ -443,7 +578,8 @@ begin
     null,
     jsonb_build_object(
       'from_status', v_old_status,
-      'to_status', p_new_status
+      'to_status', p_new_status,
+      'reason', nullif(trim(coalesce(p_reason, '')), '')
     )
   );
 
@@ -453,7 +589,7 @@ $$;
 
 grant execute on function public.lender_sign_loan(uuid, text, text) to authenticated;
 grant execute on function public.borrower_sign_loan(uuid, text) to authenticated;
-grant execute on function public.transition_loan_status(uuid, text) to authenticated;
+grant execute on function public.transition_loan_status(uuid, text, text) to authenticated;
 
 
 -- ==========================================
@@ -467,7 +603,8 @@ create table if not exists public.payments (
   date timestamptz not null,
   status text default 'pending',
   type text default 'repayment',
-  proof_url text
+  proof_url text,
+  rejection_reason text
 );
 
 do $$
@@ -489,7 +626,12 @@ $$;
 alter table public.payments enable row level security;
 
 create policy "View Payments" on payments for select using (
-  exists (select 1 from loans where loans.id = payments.loan_id and (loans.lender_id = auth.uid() or loans.borrower_id = auth.uid()))
+  exists (
+    select 1
+    from loans
+    where loans.id = payments.loan_id
+      and (loans.lender_id = (select auth.uid()) or loans.borrower_id = (select auth.uid()))
+  )
 );
 drop policy if exists "Add Payments" on payments;
 drop policy if exists "Borrower Add Repayments" on payments;
@@ -502,7 +644,7 @@ create policy "Borrower Add Repayments" on payments for insert with check (
     select 1
     from loans
     where loans.id = payments.loan_id
-      and loans.borrower_id = auth.uid()
+      and loans.borrower_id = (select auth.uid())
   )
 );
 create policy "Lender Add Funding" on payments for insert with check (
@@ -513,12 +655,17 @@ create policy "Lender Add Funding" on payments for insert with check (
     select 1
     from loans
     where loans.id = payments.loan_id
-      and loans.lender_id = auth.uid()
+      and loans.lender_id = (select auth.uid())
       and loans.status = 'approved'
   )
 );
 create policy "Lender Updates Payments" on payments for update using (
-  exists (select 1 from loans where loans.id = payments.loan_id and loans.lender_id = auth.uid())
+  exists (
+    select 1
+    from loans
+    where loans.id = payments.loan_id
+      and loans.lender_id = (select auth.uid())
+  )
 );
 
 -- ==========================================
@@ -529,6 +676,8 @@ alter table public.payments
   add column if not exists accrual_period_start timestamptz,
   add column if not exists accrual_period_end timestamptz,
   add column if not exists created_by text default 'user';
+alter table public.payments
+  add column if not exists rejection_reason text;
 
 -- 3.1.2 Data quality checks
 do $$
@@ -573,10 +722,27 @@ begin
 end;
 $$;
 
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'payments_amount_positive_check'
+      and conrelid = 'public.payments'::regclass
+  ) then
+    alter table public.payments
+      add constraint payments_amount_positive_check
+      check (amount > 0);
+  end if;
+end;
+$$;
+
 -- 3.1.3 Prevent duplicate accrual rows per loan/period/type
 create unique index if not exists payments_accrual_unique_idx
   on public.payments (loan_id, type, accrual_period_end)
   where type in ('interest', 'late_fee') and accrual_period_end is not null;
+
+create index if not exists payments_loan_status_type_idx
+  on public.payments (loan_id, status, type, date desc);
 
 -- 3.1.4 Centralized balance recompute
 create or replace function public.recompute_loan_balance(p_loan_id uuid)
@@ -695,6 +861,68 @@ $$;
 
 grant execute on function public.approve_payment_and_recompute_balance(uuid) to authenticated;
 grant execute on function public.recompute_loan_balance(uuid) to service_role;
+
+create or replace function public.reject_payment_with_reason(
+  p_payment_id uuid,
+  p_reason text
+)
+returns public.payments
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_payment public.payments%rowtype;
+begin
+  if nullif(trim(coalesce(p_reason, '')), '') is null then
+    raise exception 'Rejection reason is required';
+  end if;
+
+  select * into v_payment
+  from public.payments
+  where id = p_payment_id
+  for update;
+
+  if not found then
+    raise exception 'Payment not found';
+  end if;
+
+  if coalesce(v_payment.status, 'pending') <> 'pending' then
+    raise exception 'Payment is not pending';
+  end if;
+
+  if not exists (
+    select 1
+    from public.loans l
+    where l.id = v_payment.loan_id
+      and l.lender_id = auth.uid()
+  ) then
+    raise exception 'Not authorized to reject this payment';
+  end if;
+
+  update public.payments
+    set status = 'rejected',
+        rejection_reason = nullif(trim(coalesce(p_reason, '')), '')
+  where id = p_payment_id
+  returning * into v_payment;
+
+  perform public.append_loan_event(
+    v_payment.loan_id,
+    'payment_rejected',
+    auth.uid(),
+    v_payment.id,
+    jsonb_build_object(
+      'payment_type', v_payment.type,
+      'payment_amount', v_payment.amount,
+      'reason', v_payment.rejection_reason
+    )
+  );
+
+  return v_payment;
+end;
+$$;
+
+grant execute on function public.reject_payment_with_reason(uuid, text) to authenticated;
 
 -- 3.1.6 Interest + late fee accrual for one loan (idempotent)
 create or replace function public.accrue_loan_charges(p_loan_id uuid, p_as_of timestamptz default now())
@@ -969,27 +1197,108 @@ $$;
 
 grant execute on function public.accrue_all_loans(timestamptz) to service_role;
 
--- 3.1.9 Optional pg_cron schedule (hourly)
--- Run once in SQL editor as service_role/postgres.
-do $$
+create index if not exists accrual_runs_ran_at_idx on public.accrual_runs (ran_at desc);
+create index if not exists accrual_runs_success_ran_at_idx on public.accrual_runs (success, ran_at desc);
+
+-- 3.1.9 Scheduler management helpers (pg_cron)
+create or replace function public.ensure_accrual_schedule(p_cron text default '5 * * * *')
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_existing_job_id bigint;
+  v_new_job_id bigint;
 begin
-  if exists (select 1 from pg_extension where extname = 'pg_cron') then
-    if not exists (
-      select 1
-      from cron.job
-      where jobname = 'accrue-loan-charges-hourly'
-    ) then
-      perform cron.schedule(
-        'accrue-loan-charges-hourly',
-        '5 * * * *',
-        $$select public.accrue_all_loans(now());$$
-      );
-    end if;
+  if not exists (select 1 from pg_extension where extname = 'pg_cron') then
+    raise exception 'pg_cron extension is not enabled';
   end if;
-exception when others then
-  raise notice 'pg_cron not available or schedule creation failed: %', sqlerrm;
+
+  select jobid
+  into v_existing_job_id
+  from cron.job
+  where jobname = 'accrue-loan-charges-hourly'
+  limit 1;
+
+  if v_existing_job_id is not null then
+    perform cron.unschedule(v_existing_job_id);
+  end if;
+
+  select cron.schedule(
+    'accrue-loan-charges-hourly',
+    p_cron,
+    $cron$select public.accrue_all_loans(now());$cron$
+  )
+  into v_new_job_id;
+
+  return v_new_job_id;
 end;
 $$;
+
+create or replace function public.disable_accrual_schedule()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job_id bigint;
+begin
+  if not exists (select 1 from pg_extension where extname = 'pg_cron') then
+    return false;
+  end if;
+
+  select jobid
+  into v_job_id
+  from cron.job
+  where jobname = 'accrue-loan-charges-hourly'
+  limit 1;
+
+  if v_job_id is null then
+    return false;
+  end if;
+
+  perform cron.unschedule(v_job_id);
+  return true;
+end;
+$$;
+
+create or replace function public.get_accrual_health()
+returns table (
+  last_run_at timestamptz,
+  last_run_success boolean,
+  failed_runs_last_24h integer,
+  failed_runs_total integer
+)
+language sql
+security definer
+set search_path = public
+as $$
+  with latest as (
+    select ran_at, success
+    from public.accrual_runs
+    order by ran_at desc
+    limit 1
+  ),
+  stats as (
+    select
+      count(*) filter (where success = false and ran_at >= now() - interval '24 hours')::integer as failed_24h,
+      count(*) filter (where success = false)::integer as failed_total
+    from public.accrual_runs
+  )
+  select
+    latest.ran_at,
+    latest.success,
+    stats.failed_24h,
+    stats.failed_total
+  from stats
+  left join latest on true;
+$$;
+
+grant execute on function public.ensure_accrual_schedule(text) to service_role;
+grant execute on function public.disable_accrual_schedule() to service_role;
+grant execute on function public.get_accrual_health() to service_role;
 
 
 -- ==========================================
@@ -1009,7 +1318,7 @@ on storage.objects for insert
 to authenticated 
 with check (
   bucket_id = 'proofs' AND 
-  (storage.foldername(name))[1] = auth.uid()::text
+  (storage.foldername(name))[1] = (select auth.uid())::text
 );
 
 -- 3. Policy: Allow authenticated users to connect/select (needed for Signed URL generation context in some SDK versions, but primarily for consistency)
@@ -1023,3 +1332,38 @@ using (
   -- Removed folder check to allow Lender & Borrower to view each other's proofs
   -- Security is maintained because only they know the file path (via payments table)
 );
+
+-- ==========================================
+-- 5. APP FEEDBACK
+-- ==========================================
+create table if not exists public.app_feedback (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  feedback_type text not null check (feedback_type in ('general', 'bug', 'feature')),
+  rating integer check (rating is null or (rating >= 1 and rating <= 5)),
+  message text not null check (char_length(trim(message)) > 0),
+  app_version text,
+  os_version text
+);
+
+create index if not exists app_feedback_created_at_idx
+  on public.app_feedback (created_at desc);
+create index if not exists app_feedback_user_id_idx
+  on public.app_feedback (user_id, created_at desc);
+create index if not exists app_feedback_type_idx
+  on public.app_feedback (feedback_type, created_at desc);
+
+alter table public.app_feedback enable row level security;
+
+drop policy if exists "Insert Own Feedback" on public.app_feedback;
+create policy "Insert Own Feedback" on public.app_feedback
+for insert
+to authenticated
+with check ((select auth.uid()) = user_id);
+
+drop policy if exists "Select Own Feedback" on public.app_feedback;
+create policy "Select Own Feedback" on public.app_feedback
+for select
+to authenticated
+using ((select auth.uid()) = user_id);

@@ -3,12 +3,25 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Lendscape</string>
+	<string>Lendshake</string>
+	<key>ALERT_WEBHOOK_URL</key>
+	<string>$(ALERT_WEBHOOK_URL)</string>
+	<key>APP_ENVIRONMENT</key>
+	<string>$(APP_ENVIRONMENT)</string>
 	<key>SUPABASE_KEY</key>
 	<string>$(SUPABASE_KEY)</string>
 	<key>SUPABASE_URL</key>
 	<string>$(SUPABASE_URL)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>lendshake</string>
+			</array>
+		</dict>
+	</array>
     <key>NSContactsUsageDescription</key>
-    <string>Lendscape needs access to your contacts to let you easily select a borrower.</string>
+    <string>Lendshake needs access to your contacts to let you easily select a borrower.</string>
 </dict>
 </plist>

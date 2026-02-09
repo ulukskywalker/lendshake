@@ -13,6 +13,7 @@ struct LoanListView: View {
     // For alert handling
     @State private var loanToDelete: Loan?
     @State private var showDeleteAlert: Bool = false
+    @State private var deleteErrorMessage: String?
     
     // Filtered Lists
     var visibleLoans: [Loan] {
@@ -168,25 +169,31 @@ struct LoanListView: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color.lsBackground)
-        .overlay(alignment: .top) {
-            if loanManager.isLoading && !loanManager.loans.isEmpty {
-                ProgressView()
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.top, 8)
-            }
-        }
         .alert("Delete Draft Loan?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
                 if let loan = loanToDelete {
                     Task {
-                        try? await loanManager.deleteLoan(loan)
+                        do {
+                            try await loanManager.deleteLoan(loan)
+                        } catch {
+                            deleteErrorMessage = "Failed to delete draft: \(error.localizedDescription)"
+                        }
                     }
                 }
             }
         } message: {
             Text("Are you sure you want to delete this draft? This action cannot be undone.")
+        }
+        .alert("Delete Failed", isPresented: Binding(
+            get: { deleteErrorMessage != nil },
+            set: { if !$0 { deleteErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                deleteErrorMessage = nil
+            }
+        } message: {
+            Text(deleteErrorMessage ?? "Unknown error")
         }
     }
     

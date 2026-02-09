@@ -12,6 +12,7 @@ struct lendshakeApp: App {
     @State private var authManager = AuthManager()
     @State private var loanManager = LoanManager()
     @State private var notificationManager = NotificationManager.shared
+    @State private var appRouter = AppRouter.shared
     
     var body: some Scene {
         WindowGroup {
@@ -19,6 +20,7 @@ struct lendshakeApp: App {
                 .environment(authManager)
                 .environment(loanManager)
                 .environment(notificationManager)
+                .environment(appRouter)
         }
     }
 }
