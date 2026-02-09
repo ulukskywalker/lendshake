@@ -22,6 +22,7 @@ struct LoanConstructionView: View {
     @State private var showContactPicker: Bool = false
     @State private var showDatePickerPopover: Bool = false
     @State private var viewModel = LoanConstructionViewModel()
+    @State private var focusTask: Task<Void, Never>?
 
     @FocusState private var isPrincipalFieldFocused: Bool
 
@@ -94,12 +95,18 @@ struct LoanConstructionView: View {
         .navigationBarBackButtonHidden(true)
         .interactiveDismissDisabled(true)
         .onAppear {
-            DispatchQueue.main.async {
-                isPrincipalFieldFocused = (vm.currentStep == .amount)
-            }
+            schedulePrincipalAutoFocusIfNeeded()
         }
         .onChange(of: vm.currentStep) { _, newStep in
-            isPrincipalFieldFocused = (newStep == .amount)
+            if newStep == .amount {
+                schedulePrincipalAutoFocusIfNeeded()
+            } else {
+                focusTask?.cancel()
+                isPrincipalFieldFocused = false
+            }
+        }
+        .onDisappear {
+            focusTask?.cancel()
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -107,14 +114,16 @@ struct LoanConstructionView: View {
             }
         }
         .background {
-            ContactPicker(
-                isPresented: $showContactPicker,
-                firstName: $vm.borrowerFirstName,
-                lastName: $vm.borrowerLastName,
-                selectedEmail: $vm.borrowerEmail,
-                selectedPhone: $vm.borrowerPhone
-            )
-            .frame(width: 0, height: 0)
+            if showContactPicker {
+                ContactPicker(
+                    isPresented: $showContactPicker,
+                    firstName: $vm.borrowerFirstName,
+                    lastName: $vm.borrowerLastName,
+                    selectedEmail: $vm.borrowerEmail,
+                    selectedPhone: $vm.borrowerPhone
+                )
+                .frame(width: 0, height: 0)
+            }
         }
         .overlay(alignment: .top) {
             if let error = vm.errorMessage {
@@ -245,6 +254,19 @@ struct LoanConstructionView: View {
 
         } catch {
             vm.errorMessage = "Failed to create: \(error.localizedDescription)"
+        }
+    }
+
+    private func schedulePrincipalAutoFocusIfNeeded() {
+        focusTask?.cancel()
+        guard viewModel.currentStep == .amount else { return }
+        focusTask = Task {
+            // Let sheet/fullScreen transition finish before opening keyboard.
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled, viewModel.currentStep == .amount else { return }
+            await MainActor.run {
+                isPrincipalFieldFocused = true
+            }
         }
     }
 }
