@@ -86,6 +86,20 @@ private struct LSToastModifier: ViewModifier {
 }
 
 extension View {
+    func lsAuthInput() -> some View {
+        self
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color(uiColor: .separator).opacity(0.3), lineWidth: 1)
+            )
+    }
+
     func lsCardContainer() -> some View {
         self
             .background(Color.lsCardBackground)

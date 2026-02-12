@@ -12,23 +12,22 @@ struct AccountView: View {
 
     @State private var firstName = ""
     @State private var lastName = ""
+    @State private var addressLine1 = ""
+    @State private var addressLine2 = ""
     @State private var selectedState = "IL"
+    @State private var country = ProfileReferenceData.defaultCountry
+    @State private var postalCode = ""
     @State private var phoneNumber = ""
     @State private var isEditing = false
     @State private var isSaving = false
     @State private var firstNameError: String?
     @State private var lastNameError: String?
+    @State private var addressLine1Error: String?
+    @State private var countryError: String?
+    @State private var postalCodeError: String?
     @State private var phoneError: String?
     @State private var successToast: String?
     @State private var errorToast: String?
-
-    private let usStates = [
-        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-        "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-        "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-        "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
-    ]
 
     var body: some View {
         Form {
@@ -59,13 +58,57 @@ struct AccountView: View {
                         .foregroundStyle(.red)
                 }
 
+                TextField("Address Line 1", text: $addressLine1)
+                    .textInputAutocapitalization(.words)
+                    .disabled(!isEditing || isSaving)
+                    .opacity(isEditing ? 1 : 0.65)
+                    .onChange(of: addressLine1) { _, _ in
+                        addressLine1Error = nil
+                    }
+                if let addressLine1Error {
+                    Text(addressLine1Error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                
+                TextField("Apt / Suite (Optional)", text: $addressLine2)
+                    .textInputAutocapitalization(.words)
+                    .disabled(!isEditing || isSaving)
+                    .opacity(isEditing ? 1 : 0.65)
+
                 Picker("State of Residence", selection: $selectedState) {
-                    ForEach(usStates, id: \.self) { state in
+                    ForEach(ProfileReferenceData.usStates, id: \.self) { state in
                         Text(state).tag(state)
                     }
                 }
                 .disabled(!isEditing || isSaving)
                 .opacity(isEditing ? 1 : 0.65)
+                
+                TextField("Country", text: $country)
+                    .textInputAutocapitalization(.words)
+                    .disabled(!isEditing || isSaving)
+                    .opacity(isEditing ? 1 : 0.65)
+                    .onChange(of: country) { _, _ in
+                        countryError = nil
+                    }
+                if let countryError {
+                    Text(countryError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                
+                TextField("Postal Code / Index", text: $postalCode)
+                    .textInputAutocapitalization(.characters)
+                    .disabled(!isEditing || isSaving)
+                    .opacity(isEditing ? 1 : 0.65)
+                    .onChange(of: postalCode) { _, _ in
+                        postalCodeError = nil
+                    }
+                if let postalCodeError {
+                    Text(postalCodeError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
 
             Section("Contact") {
@@ -152,6 +195,10 @@ struct AccountView: View {
         selectedState = profile.residence_state?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             ? (profile.residence_state ?? "IL")
             : "IL"
+        addressLine1 = profile.address_line_1 ?? ""
+        addressLine2 = profile.address_line_2 ?? ""
+        country = profile.country ?? ProfileReferenceData.defaultCountry
+        postalCode = profile.postal_code ?? ""
         phoneNumber = profile.phone_number ?? ""
     }
 
@@ -163,6 +210,9 @@ struct AccountView: View {
     private func clearFieldErrors() {
         firstNameError = nil
         lastNameError = nil
+        addressLine1Error = nil
+        countryError = nil
+        postalCodeError = nil
         phoneError = nil
     }
 
@@ -171,35 +221,29 @@ struct AccountView: View {
 
         let normalizedFirst = firstName.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedLast = lastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedAddressLine1 = addressLine1.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedAddressLine2 = addressLine2.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCountry = country.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPostalCode = postalCode.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedPhone = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var hasFieldError = false
-        if normalizedFirst.isEmpty {
-            firstNameError = "First name is required."
-            hasFieldError = true
-        } else if normalizedFirst.count < 2 {
-            firstNameError = "First name must be at least 2 characters."
-            hasFieldError = true
-        }
-        if normalizedLast.isEmpty {
-            lastNameError = "Last name is required."
-            hasFieldError = true
-        } else if normalizedLast.count < 2 {
-            lastNameError = "Last name must be at least 2 characters."
-            hasFieldError = true
-        }
+        firstNameError = ProfileValidation.validateFirstName(normalizedFirst)
+        lastNameError = ProfileValidation.validateLastName(normalizedLast)
+        addressLine1Error = ProfileValidation.validateAddressLine1(normalizedAddressLine1)
+        countryError = ProfileValidation.validateCountry(normalizedCountry)
+        postalCodeError = ProfileValidation.validatePostalCode(normalizedPostalCode)
+        hasFieldError = [firstNameError, lastNameError, addressLine1Error, countryError, postalCodeError]
+            .contains(where: { $0 != nil })
         if hasFieldError {
             errorToast = "Please fix highlighted fields."
             return
         }
 
-        if !normalizedPhone.isEmpty {
-            let digits = normalizedPhone.filter(\.isNumber).count
-            guard digits >= 10 && digits <= 15 else {
-                phoneError = "Phone must include 10-15 digits."
-                errorToast = "Please fix highlighted fields."
-                return
-            }
+        if let phoneValidation = ProfileValidation.validatePhone(normalizedPhone, required: false) {
+            phoneError = phoneValidation
+            errorToast = "Please fix highlighted fields."
+            return
         }
 
         isSaving = true
@@ -209,11 +253,19 @@ struct AccountView: View {
             try await authManager.createProfile(
                 firstName: normalizedFirst,
                 lastName: normalizedLast,
+                addressLine1: normalizedAddressLine1,
+                addressLine2: normalizedAddressLine2.isEmpty ? nil : normalizedAddressLine2,
                 state: selectedState,
+                country: normalizedCountry,
+                postalCode: normalizedPostalCode,
                 phoneNumber: normalizedPhone
             )
             firstName = normalizedFirst
             lastName = normalizedLast
+            addressLine1 = normalizedAddressLine1
+            addressLine2 = normalizedAddressLine2
+            country = normalizedCountry
+            postalCode = normalizedPostalCode
             phoneNumber = normalizedPhone
             isEditing = false
             successToast = "Profile updated."

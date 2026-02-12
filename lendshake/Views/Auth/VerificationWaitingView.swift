@@ -10,6 +10,7 @@ import SwiftUI
 struct VerificationWaitingView: View {
     @Environment(AuthManager.self) var authManager
     @State private var isChecking = false
+    @State private var statusMessage: String?
     
     var body: some View {
         VStack(spacing: 20) {
@@ -27,18 +28,24 @@ struct VerificationWaitingView: View {
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
                 .padding(.horizontal)
+
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
             
             Spacer()
             
             Button {
                 Task {
                     isChecking = true
-                    await authManager.checkSession()
-                    
-                    if !authManager.isAuthenticated {
-                        // If no session found (because deep link was skipped),
-                        // we must ask the user to Sign In manually.
-                        authManager.awaitingEmailConfirmation = false
+                    statusMessage = nil
+                    let completed = await authManager.completeVerificationIfPossible()
+                    if !completed {
+                        statusMessage = "Open the verification link from the same device to finish sign in."
                     }
                     isChecking = false
                 }

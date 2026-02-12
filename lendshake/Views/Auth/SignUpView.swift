@@ -21,12 +21,12 @@ struct SignUpView: View {
                 .bold()
             
             TextField("Email", text: $email)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
+                .lsAuthInput()
             
             SecureField("Password", text: $password)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .lsAuthInput()
             
             if let errorMessage = errorMessage {
                 Text(errorMessage)

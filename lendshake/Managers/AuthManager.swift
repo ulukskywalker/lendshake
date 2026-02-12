@@ -22,6 +22,8 @@ class AuthManager {
     private var profileNameCache: [UUID: String] = [:]
     private var missingProfileNameIDs: Set<UUID> = []
     private var inFlightProfileNameTasks: [UUID: Task<String?, Never>] = [:]
+    private var pendingVerificationEmail: String?
+    private var pendingVerificationPassword: String?
     var currentUserEmail: String? {
         supabase.auth.currentUser?.email
     }
@@ -30,7 +32,11 @@ class AuthManager {
     struct UserProfile: Decodable {
         let first_name: String?
         let last_name: String?
+        let address_line_1: String?
+        let address_line_2: String?
         let residence_state: String? // Added state
+        let country: String?
+        let postal_code: String?
         let phone_number: String? // Added phone number
         let updated_at: Date?
         
@@ -77,7 +83,12 @@ class AuthManager {
             self.currentUserProfile = profile
             
             if let first = profile.first_name, !first.isEmpty,
-               let last = profile.last_name, !last.isEmpty {
+               let last = profile.last_name, !last.isEmpty,
+               let address = profile.address_line_1, !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let state = profile.residence_state, state.count == 2,
+               let country = profile.country, !country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let postal = profile.postal_code, !postal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let phone = profile.phone_number, !phone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 self.isProfileComplete = true
             } else {
                 self.isProfileComplete = false
@@ -130,14 +141,27 @@ class AuthManager {
         }
     }
     
-    func createProfile(firstName: String, lastName: String, state: String, phoneNumber: String) async throws {
+    func createProfile(
+        firstName: String,
+        lastName: String,
+        addressLine1: String,
+        addressLine2: String?,
+        state: String,
+        country: String,
+        postalCode: String,
+        phoneNumber: String
+    ) async throws {
         guard let user = supabase.auth.currentUser else { return }
         
         struct ProfileUpdate: Encodable {
             let id: UUID
             let first_name: String
             let last_name: String
+            let address_line_1: String
+            let address_line_2: String?
             let residence_state: String
+            let country: String
+            let postal_code: String
             let phone_number: String
             let updated_at: Date
         }
@@ -146,7 +170,11 @@ class AuthManager {
             id: user.id,
             first_name: firstName,
             last_name: lastName,
+            address_line_1: addressLine1,
+            address_line_2: addressLine2,
             residence_state: state,
+            country: country,
+            postal_code: postalCode,
             phone_number: phoneNumber,
             updated_at: Date()
         )
@@ -165,18 +193,30 @@ class AuthManager {
         self.isAuthenticated = false
         self.isProfileComplete = false
         self.currentUserProfile = nil
+        self.pendingVerificationEmail = nil
+        self.pendingVerificationPassword = nil
     }
     
     func signIn(email: String, password: String) async throws {
         _ = try await supabase.auth.signIn(email: email, password: password)
+        self.awaitingEmailConfirmation = false
         self.isAuthenticated = true
         await checkSession()
+        self.pendingVerificationEmail = nil
+        self.pendingVerificationPassword = nil
     }
     
     func signUp(email: String, password: String) async throws {
         do {
-            _ = try await supabase.auth.signUp(email: email, password: password)
+            let redirectURL = URL(string: "lendshake://auth/callback")
+            _ = try await supabase.auth.signUp(
+                email: email,
+                password: password,
+                redirectTo: redirectURL
+            )
             self.awaitingEmailConfirmation = true
+            self.pendingVerificationEmail = email
+            self.pendingVerificationPassword = password
         } catch {
             await AlertReporter.shared.capture(
                 error: error,
@@ -199,9 +239,38 @@ class AuthManager {
             awaitingEmailConfirmation = false
             isAuthenticated = true
             try await checkProfile()
+            pendingVerificationEmail = nil
+            pendingVerificationPassword = nil
             return true
         } catch {
             logger.warning("Auth callback handling failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    func completeVerificationIfPossible() async -> Bool {
+        await checkSession()
+        if isAuthenticated {
+            awaitingEmailConfirmation = false
+            pendingVerificationEmail = nil
+            pendingVerificationPassword = nil
+            return true
+        }
+
+        guard let email = pendingVerificationEmail, let password = pendingVerificationPassword else {
+            return false
+        }
+
+        do {
+            _ = try await supabase.auth.signIn(email: email, password: password)
+            awaitingEmailConfirmation = false
+            isAuthenticated = true
+            try await checkProfile()
+            pendingVerificationEmail = nil
+            pendingVerificationPassword = nil
+            return true
+        } catch {
+            logger.info("Verification completion sign-in not ready: \(error.localizedDescription)")
             return false
         }
     }

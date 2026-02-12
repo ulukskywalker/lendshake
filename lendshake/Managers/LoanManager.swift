@@ -483,7 +483,7 @@ class LoanManager {
         case .draft:
             return (isLender && loan.lender_signed_at == nil) ? "Sign agreement" : nil
         case .sent:
-            return (!isLender && loan.borrower_signed_at == nil) ? "Review and sign agreement" : nil
+            return (!isLender && loan.borrower_signed_at == nil) ? "Complete info and sign agreement" : nil
         case .approved:
             return isLender ? "Send funds confirmation" : nil
         case .funding_sent:
@@ -579,6 +579,50 @@ class LoanManager {
         // Refresh
         try await fetchLoans()
         logger.info("Loan signed by \(isLender ? "lender" : "borrower"), loan_id=\(loanId.uuidString)")
+    }
+    
+    func signLoanAsBorrower(
+        loan: Loan,
+        firstName: String,
+        lastName: String,
+        addressLine1: String,
+        addressLine2: String,
+        state: String,
+        country: String,
+        postalCode: String,
+        phoneNumber: String
+    ) async throws {
+        self.isLoading = true
+        defer { self.isLoading = false }
+
+        guard let user = supabase.auth.currentUser else {
+            throw AuthError.notAuthenticated
+        }
+        guard loan.lender_id != user.id else {
+            throw NSError(domain: "LoanManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Lender cannot sign as borrower."])
+        }
+        guard let loanId = loan.id else { return }
+
+        let ipAddress = await fetchPublicIP()
+        let params: [String: String] = [
+            "p_loan_id": loanId.uuidString,
+            "p_borrower_ip": ipAddress ?? "",
+            "p_borrower_first_name": firstName,
+            "p_borrower_last_name": lastName,
+            "p_borrower_address_line_1": addressLine1,
+            "p_borrower_address_line_2": addressLine2,
+            "p_borrower_state": state,
+            "p_borrower_country": country,
+            "p_borrower_postal_code": postalCode,
+            "p_borrower_phone": phoneNumber
+        ]
+
+        _ = try await supabase
+            .rpc("borrower_sign_loan_with_identity", params: params)
+            .execute()
+
+        try await fetchLoans()
+        logger.info("Loan signed by borrower, loan_id=\(loanId.uuidString)")
     }
     
     func deleteLoan(_ loan: Loan) async throws {

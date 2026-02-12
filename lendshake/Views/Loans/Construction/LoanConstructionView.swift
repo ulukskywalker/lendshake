@@ -19,10 +19,10 @@ struct LoanConstructionView: View {
     var onLoanCreated: ((Loan) -> Void)?
 
     @State private var createdLoan: Loan?
-    @State private var showContactPicker: Bool = false
     @State private var showDatePickerPopover: Bool = false
     @State private var viewModel = LoanConstructionViewModel()
     @State private var focusTask: Task<Void, Never>?
+    @State private var didPrefillLenderProfile = false
 
     @FocusState private var isPrincipalFieldFocused: Bool
 
@@ -61,13 +61,23 @@ struct LoanConstructionView: View {
                         onLateFeeSliderChange: vm.handleLateFeeSliderChange
                     )
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                case .lender:
+                    LoanConstructionLenderStep(
+                        lenderFirstName: $vm.lenderFirstName,
+                        lenderLastName: $vm.lenderLastName,
+                        lenderAddressLine1: $vm.lenderAddressLine1,
+                        lenderAddressLine2: $vm.lenderAddressLine2,
+                        lenderPhone: $vm.lenderPhone,
+                        lenderState: $vm.lenderState,
+                        lenderCountry: $vm.lenderCountry,
+                        lenderPostalCode: $vm.lenderPostalCode,
+                        saveLenderInfoForFuture: $vm.saveLenderInfoForFuture,
+                        usStates: ProfileReferenceData.usStates
+                    )
+                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 case .borrower:
                     LoanConstructionBorrowerStep(
-                        borrowerFirstName: $vm.borrowerFirstName,
-                        borrowerLastName: $vm.borrowerLastName,
-                        borrowerEmail: $vm.borrowerEmail,
-                        borrowerPhone: $vm.borrowerPhone,
-                        onImportContact: { showContactPicker = true }
+                        borrowerEmail: $vm.borrowerEmail
                     )
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 case .review:
@@ -77,9 +87,8 @@ struct LoanConstructionView: View {
                         repaymentSchedule: vm.repaymentSchedule,
                         maturityDate: vm.maturityDate,
                         lateFeePolicy: vm.lateFeePolicy,
-                        lenderName: authManager.currentUserProfile?.fullName ?? "Me",
-                        borrowerFirstName: vm.borrowerFirstName,
-                        borrowerLastName: vm.borrowerLastName
+                        lenderName: "\(vm.lenderFirstName) \(vm.lenderLastName)".trimmingCharacters(in: .whitespaces),
+                        borrowerEmail: vm.borrowerEmail
                     )
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 }
@@ -95,7 +104,11 @@ struct LoanConstructionView: View {
         .navigationBarBackButtonHidden(true)
         .interactiveDismissDisabled(true)
         .onAppear {
+            prefillLenderFromProfileIfNeeded(vm: vm)
             schedulePrincipalAutoFocusIfNeeded()
+        }
+        .onChange(of: authManager.currentUserProfile?.updated_at) { _, _ in
+            prefillLenderFromProfileIfNeeded(vm: vm)
         }
         .onChange(of: vm.currentStep) { _, newStep in
             if newStep == .amount {
@@ -111,18 +124,6 @@ struct LoanConstructionView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
-            }
-        }
-        .background {
-            if showContactPicker {
-                ContactPicker(
-                    isPresented: $showContactPicker,
-                    firstName: $vm.borrowerFirstName,
-                    lastName: $vm.borrowerLastName,
-                    selectedEmail: $vm.borrowerEmail,
-                    selectedPhone: $vm.borrowerPhone
-                )
-                .frame(width: 0, height: 0)
             }
         }
         .overlay(alignment: .top) {
@@ -209,7 +210,13 @@ struct LoanConstructionView: View {
 
         case .terms:
             guard vm.validateTermsStep() else { return }
-            withAnimation { vm.currentStep = .borrower }
+            withAnimation { vm.currentStep = .lender }
+
+        case .lender:
+            guard vm.validateLenderStep() else { return }
+            Task {
+                await persistLenderProfileAndAdvance(vm: vm)
+            }
 
         case .borrower:
             guard vm.validateBorrowerStep() else { return }
@@ -225,17 +232,41 @@ struct LoanConstructionView: View {
         }
     }
 
+    private func persistLenderProfileAndAdvance(vm: LoanConstructionViewModel) async {
+        guard vm.saveLenderInfoForFuture else {
+            withAnimation { vm.currentStep = .borrower }
+            return
+        }
+
+        do {
+            try await authManager.createProfile(
+                firstName: vm.lenderFirstName,
+                lastName: vm.lenderLastName,
+                addressLine1: vm.lenderAddressLine1,
+                addressLine2: vm.lenderAddressLine2.isEmpty ? nil : vm.lenderAddressLine2,
+                state: vm.lenderState,
+                country: vm.lenderCountry,
+                postalCode: vm.lenderPostalCode,
+                phoneNumber: vm.lenderPhone
+            )
+            withAnimation { vm.currentStep = .borrower }
+        } catch {
+            vm.errorMessage = "Failed to save your profile info: \(error.localizedDescription)"
+        }
+    }
+
     private func createLoan(vm: LoanConstructionViewModel) async {
         if createdLoan != nil {
             dismiss()
             return
         }
 
-        guard vm.validateAmountStep(), vm.validateTermsStep(), vm.validateBorrowerStep() else { return }
+        guard vm.validateAmountStep(),
+              vm.validateTermsStep(),
+              vm.validateLenderStep(),
+              vm.validateBorrowerStep() else { return }
         guard let principal = Double(vm.principalAmount) else { return }
         let interest = Double(vm.interestRate) ?? 0.0
-        let fullName = "\(vm.borrowerFirstName) \(vm.borrowerLastName)".trimmingCharacters(in: .whitespaces)
-
         do {
             let newLoan = try await loanManager.createDraftLoan(
                 principal: principal,
@@ -243,9 +274,9 @@ struct LoanConstructionView: View {
                 schedule: vm.repaymentSchedule.rawValue,
                 lateFee: vm.lateFeePolicy,
                 maturity: vm.maturityDate,
-                borrowerName: fullName,
+                borrowerName: nil,
                 borrowerEmail: vm.borrowerEmail,
-                borrowerPhone: vm.borrowerPhone.isEmpty ? nil : vm.borrowerPhone
+                borrowerPhone: nil
             )
 
             createdLoan = newLoan
@@ -268,6 +299,37 @@ struct LoanConstructionView: View {
                 isPrincipalFieldFocused = true
             }
         }
+    }
+
+    private func prefillLenderFromProfileIfNeeded(vm: LoanConstructionViewModel) {
+        guard !didPrefillLenderProfile else { return }
+        guard let profile = authManager.currentUserProfile else { return }
+
+        if let first = profile.first_name?.trimmingCharacters(in: .whitespacesAndNewlines), !first.isEmpty {
+            vm.lenderFirstName = first
+        }
+        if let last = profile.last_name?.trimmingCharacters(in: .whitespacesAndNewlines), !last.isEmpty {
+            vm.lenderLastName = last
+        }
+        if let addressLine1 = profile.address_line_1?.trimmingCharacters(in: .whitespacesAndNewlines), !addressLine1.isEmpty {
+            vm.lenderAddressLine1 = addressLine1
+        }
+        if let addressLine2 = profile.address_line_2?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            vm.lenderAddressLine2 = addressLine2
+        }
+        if let phone = profile.phone_number?.trimmingCharacters(in: .whitespacesAndNewlines), !phone.isEmpty {
+            vm.lenderPhone = phone
+        }
+        if let state = profile.residence_state?.trimmingCharacters(in: .whitespacesAndNewlines), state.count == 2 {
+            vm.lenderState = state.uppercased()
+        }
+        if let country = profile.country?.trimmingCharacters(in: .whitespacesAndNewlines), !country.isEmpty {
+            vm.lenderCountry = country
+        }
+        if let postalCode = profile.postal_code?.trimmingCharacters(in: .whitespacesAndNewlines), !postalCode.isEmpty {
+            vm.lenderPostalCode = postalCode
+        }
+        didPrefillLenderProfile = true
     }
 }
 

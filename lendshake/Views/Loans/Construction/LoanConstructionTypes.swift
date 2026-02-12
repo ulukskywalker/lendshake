@@ -10,14 +10,16 @@ import SwiftUI
 enum LoanConstructionWizardStep: Int, CaseIterable {
     case amount = 1
     case terms = 2
-    case borrower = 3
-    case review = 4
+    case lender = 3
+    case borrower = 4
+    case review = 5
 
     var title: String {
         switch self {
         case .amount: return "The Money"
         case .terms: return "The Terms"
-        case .borrower: return "The Contact"
+        case .lender: return "Your Info"
+        case .borrower: return "Borrower Invite"
         case .review: return "Review"
         }
     }

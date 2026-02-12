@@ -21,10 +21,16 @@ final class LoanConstructionViewModel {
     var interestSliderValue: Double = 0.0
     var repaymentSchedule: RepaymentSchedule = .monthly
     var maturityDate: Date = Date().addingTimeInterval(86400 * 30 * 6)
-    var borrowerFirstName: String = ""
-    var borrowerLastName: String = ""
+    var lenderFirstName: String = ""
+    var lenderLastName: String = ""
+    var lenderAddressLine1: String = ""
+    var lenderAddressLine2: String = ""
+    var lenderPhone: String = ""
+    var lenderState: String = "IL"
+    var lenderCountry: String = ProfileReferenceData.defaultCountry
+    var lenderPostalCode: String = ""
+    var saveLenderInfoForFuture: Bool = true
     var borrowerEmail: String = ""
-    var borrowerPhone: String = ""
     var lateFeePolicy: String = "0"
     var lateFeeSliderValue: Double = 0
 
@@ -88,14 +94,7 @@ final class LoanConstructionViewModel {
     }
 
     func validateBorrowerStep() -> Bool {
-        let first = borrowerFirstName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let last = borrowerLastName.trimmingCharacters(in: .whitespacesAndNewlines)
         let email = borrowerEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-
-        guard !first.isEmpty, !last.isEmpty else {
-            errorMessage = "Borrower first and last name are required."
-            return false
-        }
 
         let emailPattern = "^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"
         let emailIsValid = NSPredicate(format: "SELF MATCHES %@", emailPattern).evaluate(with: email)
@@ -103,18 +102,53 @@ final class LoanConstructionViewModel {
             errorMessage = "Enter a valid borrower email."
             return false
         }
+        borrowerEmail = email
+        return true
+    }
 
-        if !borrowerPhone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let digitCount = borrowerPhone.filter(\.isNumber).count
-            guard digitCount >= 10 else {
-                errorMessage = "Borrower phone must have at least 10 digits."
-                return false
-            }
+    func validateLenderStep() -> Bool {
+        let first = lenderFirstName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let last = lenderLastName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let addressLine1 = lenderAddressLine1.trimmingCharacters(in: .whitespacesAndNewlines)
+        let addressLine2 = lenderAddressLine2.trimmingCharacters(in: .whitespacesAndNewlines)
+        let phone = lenderPhone.trimmingCharacters(in: .whitespacesAndNewlines)
+        let state = lenderState.trimmingCharacters(in: .whitespacesAndNewlines)
+        let country = lenderCountry.trimmingCharacters(in: .whitespacesAndNewlines)
+        let postalCode = lenderPostalCode.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if ProfileValidation.validateFirstName(first) != nil || ProfileValidation.validateLastName(last) != nil {
+            errorMessage = "Your first and last name are required."
+            return false
+        }
+        if ProfileValidation.validateAddressLine1(addressLine1) != nil {
+            errorMessage = "Enter Address Line 1."
+            return false
+        }
+        if let phoneError = ProfileValidation.validatePhone(phone, required: true) {
+            errorMessage = phoneError
+            return false
+        }
+        if let stateError = ProfileValidation.validateState(state) {
+            errorMessage = stateError
+            return false
+        }
+        if let countryError = ProfileValidation.validateCountry(country) {
+            errorMessage = countryError
+            return false
+        }
+        if let postalError = ProfileValidation.validatePostalCode(postalCode) {
+            errorMessage = postalError
+            return false
         }
 
-        borrowerFirstName = first
-        borrowerLastName = last
-        borrowerEmail = email
+        lenderFirstName = first
+        lenderLastName = last
+        lenderAddressLine1 = addressLine1
+        lenderAddressLine2 = addressLine2
+        lenderPhone = phone
+        lenderState = state.uppercased()
+        lenderCountry = country
+        lenderPostalCode = postalCode
         return true
     }
 

@@ -28,6 +28,7 @@ struct LoanDetailView: View {
     @State private var agreementRejectionReason: String = ""
     
     @State private var showAgreementSheet: Bool = false
+    @State private var showBorrowerSignSheet: Bool = false
     @State private var showProofSheet: Bool = false
     @State private var showTermsSheet: Bool = false
     @State private var showReleaseSheet: Bool = false
@@ -42,6 +43,16 @@ struct LoanDetailView: View {
     @State private var paymentsRealtimeTask: Task<Void, Never>?
     @State private var didSubmitPaymentSheet: Bool = false
     @State private var didApplyInitialPaymentSelection: Bool = false
+    @State private var borrowerFirstNameInput: String = ""
+    @State private var borrowerLastNameInput: String = ""
+    @State private var borrowerAddressLine1Input: String = ""
+    @State private var borrowerAddressLine2Input: String = ""
+    @State private var borrowerPhoneInput: String = ""
+    @State private var borrowerStateInput: String = "IL"
+    @State private var borrowerCountryInput: String = ProfileReferenceData.defaultCountry
+    @State private var borrowerPostalCodeInput: String = ""
+    @State private var saveBorrowerInfoForFuture: Bool = true
+    @State private var borrowerSignInFlight: Bool = false
 
 
     
@@ -80,7 +91,7 @@ struct LoanDetailView: View {
             await refreshLoanDetailData()
         }
         .background(Color.lsBackground)
-        .navigationTitle(liveLoan.borrower_name ?? "Loan Ledger")
+        .navigationTitle(liveLoan.borrower_name_snapshot ?? liveLoan.borrower_name ?? liveLoan.borrower_email ?? "Loan Ledger")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -159,6 +170,61 @@ struct LoanDetailView: View {
                     Task { await refreshLoanDetailData() }
                 }
         }
+        .sheet(isPresented: $showBorrowerSignSheet) {
+            NavigationStack {
+                Form {
+                    Section("Your Legal Identity") {
+                        TextField("Legal First Name", text: $borrowerFirstNameInput)
+                            .textInputAutocapitalization(.words)
+                        TextField("Legal Last Name", text: $borrowerLastNameInput)
+                            .textInputAutocapitalization(.words)
+                        TextField("Address Line 1", text: $borrowerAddressLine1Input)
+                            .textInputAutocapitalization(.words)
+                        TextField("Apt / Suite (Optional)", text: $borrowerAddressLine2Input)
+                            .textInputAutocapitalization(.words)
+                    }
+
+                    Section("Your Contact Info") {
+                        TextField("Mobile Phone", text: $borrowerPhoneInput)
+                            .keyboardType(.phonePad)
+                        Picker("State of Residence", selection: $borrowerStateInput) {
+                            ForEach(ProfileReferenceData.usStates, id: \.self) { state in
+                                Text(state).tag(state)
+                            }
+                        }
+                        TextField("Country", text: $borrowerCountryInput)
+                            .textInputAutocapitalization(.words)
+                        TextField("Postal Code / Index", text: $borrowerPostalCodeInput)
+                            .textInputAutocapitalization(.characters)
+                    }
+                    
+                    Section {
+                        Toggle("Save this info for future use", isOn: $saveBorrowerInfoForFuture)
+                    }
+                }
+                .navigationTitle("Complete Before Signing")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showBorrowerSignSheet = false }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button {
+                            Task {
+                                await signBorrowerWithProfile()
+                            }
+                        } label: {
+                            if borrowerSignInFlight {
+                                ProgressView()
+                            } else {
+                                Text("Sign & Send Back")
+                                    .bold()
+                            }
+                        }
+                        .disabled(borrowerSignInFlight)
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $showAgreementSheet) {
             NavigationStack {
                 ScrollView {
@@ -176,8 +242,7 @@ struct LoanDetailView: View {
                     }
                     
                     // Show "Sign" button if the current user needs to sign
-                    if (isLender && liveLoan.status == .draft && liveLoan.lender_signed_at == nil) ||
-                       (!isLender && liveLoan.status == .sent && liveLoan.borrower_signed_at == nil) {
+                    if isLender && liveLoan.status == .draft && liveLoan.lender_signed_at == nil {
                         ToolbarItem(placement: .confirmationAction) {
                             Button {
                                 Task {
@@ -216,7 +281,7 @@ struct LoanDetailView: View {
                     }
                     Section("Parties") {
                         LabeledContent("Lender", value: liveLoan.lender_name_snapshot ?? lenderName)
-                        LabeledContent("Borrower", value: liveLoan.borrower_name_snapshot ?? liveLoan.borrower_name ?? "Unknown")
+                        LabeledContent("Borrower", value: liveLoan.borrower_name_snapshot ?? liveLoan.borrower_name ?? liveLoan.borrower_email ?? "Unknown")
                     }
                     if liveLoan.status == .cancelled,
                        let reason = liveLoan.agreement_rejection_reason?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -483,9 +548,10 @@ struct LoanDetailView: View {
         if !isLender && liveLoan.borrower_signed_at == nil {
             VStack(spacing: 10) {
                 Button {
-                    showAgreementSheet = true
+                    prepareBorrowerProfileInputs()
+                    showBorrowerSignSheet = true
                 } label: {
-                    Text("Review & Accept Loan")
+                    Text("Complete Info & Sign")
                         .lsPrimaryButton()
                 }
 
@@ -628,6 +694,96 @@ struct LoanDetailView: View {
             return authManager.currentUserProfile?.fullName ?? "Me"
         }
         return await authManager.fetchProfileName(for: liveLoan.lender_id) ?? "Unknown"
+    }
+    
+    private func prepareBorrowerProfileInputs() {
+        let profile = authManager.currentUserProfile
+        borrowerFirstNameInput = profile?.first_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        borrowerLastNameInput = profile?.last_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        borrowerAddressLine1Input = profile?.address_line_1?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        borrowerAddressLine2Input = profile?.address_line_2?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        borrowerPhoneInput = profile?.phone_number?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        borrowerStateInput = (profile?.residence_state?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "IL")
+        borrowerCountryInput = profile?.country?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ProfileReferenceData.defaultCountry
+        borrowerPostalCodeInput = profile?.postal_code?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        saveBorrowerInfoForFuture = true
+    }
+
+    @MainActor
+    private func signBorrowerWithProfile() async {
+        let normalizedFirst = borrowerFirstNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedLast = borrowerLastNameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedAddressLine1 = borrowerAddressLine1Input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedAddressLine2 = borrowerAddressLine2Input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPhone = borrowerPhoneInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedState = borrowerStateInput.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let normalizedCountry = borrowerCountryInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPostalCode = borrowerPostalCodeInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalizedFirst.isEmpty, !normalizedLast.isEmpty else {
+            errorMsg = "Your legal first and last name are required."
+            showError = true
+            return
+        }
+        if ProfileValidation.validateAddressLine1(normalizedAddressLine1) != nil {
+            errorMsg = "Address Line 1 is required."
+            showError = true
+            return
+        }
+        if let phoneError = ProfileValidation.validatePhone(normalizedPhone, required: true) {
+            errorMsg = phoneError
+            showError = true
+            return
+        }
+        if let stateError = ProfileValidation.validateState(normalizedState) {
+            errorMsg = stateError
+            showError = true
+            return
+        }
+        if let countryError = ProfileValidation.validateCountry(normalizedCountry) {
+            errorMsg = countryError
+            showError = true
+            return
+        }
+        if let postalCodeError = ProfileValidation.validatePostalCode(normalizedPostalCode) {
+            errorMsg = postalCodeError
+            showError = true
+            return
+        }
+
+        borrowerSignInFlight = true
+        defer { borrowerSignInFlight = false }
+
+        do {
+            if saveBorrowerInfoForFuture {
+                try await authManager.createProfile(
+                    firstName: normalizedFirst,
+                    lastName: normalizedLast,
+                    addressLine1: normalizedAddressLine1,
+                    addressLine2: normalizedAddressLine2.isEmpty ? nil : normalizedAddressLine2,
+                    state: normalizedState,
+                    country: normalizedCountry,
+                    postalCode: normalizedPostalCode,
+                    phoneNumber: normalizedPhone
+                )
+            }
+
+            try await loanManager.signLoanAsBorrower(
+                loan: liveLoan,
+                firstName: normalizedFirst,
+                lastName: normalizedLast,
+                addressLine1: normalizedAddressLine1,
+                addressLine2: normalizedAddressLine2,
+                state: normalizedState,
+                country: normalizedCountry,
+                postalCode: normalizedPostalCode,
+                phoneNumber: normalizedPhone
+            )
+            showBorrowerSignSheet = false
+        } catch {
+            errorMsg = "Signing failed: \(error.localizedDescription)"
+            showError = true
+        }
     }
 
     @MainActor

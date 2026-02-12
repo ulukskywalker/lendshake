@@ -5,21 +5,53 @@ create table if not exists public.profiles (
   id uuid references auth.users not null primary key,
   first_name text,
   last_name text,
+  address_line_1 text,
+  address_line_2 text,
   phone_number text,
   residence_state text,
+  country text,
+  postal_code text,
   updated_at timestamptz
 );
 
 alter table public.profiles drop column if exists reminder_enabled;
 alter table public.profiles drop column if exists next_reminder_at;
+alter table public.profiles add column if not exists address_line_1 text;
+alter table public.profiles add column if not exists address_line_2 text;
+alter table public.profiles add column if not exists country text;
+alter table public.profiles add column if not exists postal_code text;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'profiles'
+      and column_name = 'street_address'
+  ) then
+    execute 'update public.profiles set address_line_1 = coalesce(address_line_1, street_address) where nullif(trim(coalesce(address_line_1, '''')), '''') is null and nullif(trim(coalesce(street_address, '''')), '''') is not null';
+  end if;
+end;
+$$;
 
 alter table public.profiles enable row level security;
 
 create policy "Public Profiles" on profiles for select using (true);
 drop policy if exists "Manage Own Profile" on profiles;
-create policy "Manage Own Profile" on profiles for all
+drop policy if exists "Manage Own Profile Insert" on profiles;
+drop policy if exists "Manage Own Profile Update" on profiles;
+drop policy if exists "Manage Own Profile Delete" on profiles;
+drop policy if exists "Insert Own Profile" on profiles;
+drop policy if exists "Update Own Profile" on profiles;
+drop policy if exists "Delete Own Profile" on profiles;
+create policy "Insert Own Profile" on profiles for insert
+with check ((select auth.uid()) = id);
+create policy "Update Own Profile" on profiles for update
 using ((select auth.uid()) = id)
 with check ((select auth.uid()) = id);
+create policy "Delete Own Profile" on profiles for delete
+using ((select auth.uid()) = id);
 
 
 -- ==========================================
@@ -107,13 +139,6 @@ begin
     );
   end if;
 
-  if nullif(trim(coalesce(new.borrower_name_snapshot, '')), '') is null then
-    new.borrower_name_snapshot := coalesce(
-      nullif(trim(coalesce(new.borrower_name, '')), ''),
-      'Borrower'
-    );
-  end if;
-
   return new;
 end;
 $$;
@@ -130,13 +155,20 @@ set
     public.resolve_profile_full_name(l.lender_id),
     'Lender'
   ),
-  borrower_name_snapshot = coalesce(
-    nullif(trim(coalesce(l.borrower_name_snapshot, '')), ''),
-    nullif(trim(coalesce(l.borrower_name, '')), ''),
-    'Borrower'
-  )
+  borrower_name_snapshot = case
+    when l.borrower_signed_at is null then nullif(trim(coalesce(l.borrower_name_snapshot, '')), '')
+    else coalesce(
+      nullif(trim(coalesce(l.borrower_name_snapshot, '')), ''),
+      public.resolve_profile_full_name(l.borrower_id),
+      nullif(trim(coalesce(l.borrower_name, '')), ''),
+      'Borrower'
+    )
+  end
 where nullif(trim(coalesce(l.lender_name_snapshot, '')), '') is null
-   or nullif(trim(coalesce(l.borrower_name_snapshot, '')), '') is null;
+   or (
+     l.borrower_signed_at is not null
+     and nullif(trim(coalesce(l.borrower_name_snapshot, '')), '') is null
+   );
 
 -- 2.4 Loan invariants and immutable signed document fields
 do $$
@@ -233,7 +265,7 @@ begin
     raise exception 'lender_name_snapshot is immutable once set';
   end if;
 
-  if nullif(trim(coalesce(old.borrower_name_snapshot, '')), '') is not null
+  if old.borrower_signed_at is not null
      and new.borrower_name_snapshot is distinct from old.borrower_name_snapshot then
     raise exception 'borrower_name_snapshot is immutable once set';
   end if;
@@ -289,10 +321,19 @@ create policy "View Loan Events" on public.loan_events for select using (
 );
 
 drop policy if exists "No Direct Loan Event Writes" on public.loan_events;
-create policy "No Direct Loan Event Writes" on public.loan_events
-for all
+drop policy if exists "No Direct Loan Event Inserts" on public.loan_events;
+drop policy if exists "No Direct Loan Event Updates" on public.loan_events;
+drop policy if exists "No Direct Loan Event Deletes" on public.loan_events;
+create policy "No Direct Loan Event Inserts" on public.loan_events
+for insert
+with check (false);
+create policy "No Direct Loan Event Updates" on public.loan_events
+for update
 using (false)
 with check (false);
+create policy "No Direct Loan Event Deletes" on public.loan_events
+for delete
+using (false);
 
 create or replace function public.append_loan_event(
   p_loan_id uuid,
@@ -331,7 +372,6 @@ as $$
 declare
   v_loan public.loans%rowtype;
   v_lender_snapshot text;
-  v_borrower_snapshot text;
 begin
   if auth.uid() is null then
     raise exception 'Not authenticated';
@@ -367,17 +407,10 @@ begin
     public.resolve_profile_full_name(v_loan.lender_id),
     'Lender'
   );
-  v_borrower_snapshot := coalesce(
-    nullif(trim(coalesce(v_loan.borrower_name_snapshot, '')), ''),
-    nullif(trim(coalesce(v_loan.borrower_name, '')), ''),
-    'Borrower'
-  );
-
   update public.loans
     set lender_signed_at = now(),
         agreement_text = p_agreement_text,
         lender_name_snapshot = v_lender_snapshot,
-        borrower_name_snapshot = v_borrower_snapshot,
         lender_ip = nullif(p_lender_ip, ''),
         status = 'sent'
   where id = p_loan_id
@@ -408,11 +441,58 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+begin
+  return public.borrower_sign_loan_with_identity(
+    p_loan_id,
+    p_borrower_ip,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  );
+end;
+$$;
+
+create or replace function public.borrower_sign_loan_with_identity(
+  p_loan_id uuid,
+  p_borrower_ip text default null,
+  p_borrower_first_name text default null,
+  p_borrower_last_name text default null,
+  p_borrower_address_line_1 text default null,
+  p_borrower_address_line_2 text default null,
+  p_borrower_state text default null,
+  p_borrower_country text default null,
+  p_borrower_postal_code text default null,
+  p_borrower_phone text default null
+)
+returns public.loans
+language plpgsql
+security definer
+set search_path = public
+as $$
 declare
   v_loan public.loans%rowtype;
   v_user_email text;
   v_lender_snapshot text;
+  v_borrower_profile_name text;
   v_borrower_snapshot text;
+  v_borrower_address_line_1 text;
+  v_borrower_address_line_2 text;
+  v_borrower_state text;
+  v_borrower_country text;
+  v_borrower_postal_code text;
+  v_borrower_phone text;
+  v_input_first_name text;
+  v_input_last_name text;
+  v_input_address_line_1 text;
+  v_input_address_line_2 text;
+  v_input_state text;
+  v_input_country text;
+  v_input_postal_code text;
+  v_input_phone text;
 begin
   if auth.uid() is null then
     raise exception 'Not authenticated';
@@ -444,16 +524,80 @@ begin
     raise exception 'Authenticated user email does not match borrower email';
   end if;
 
+  v_input_first_name := nullif(trim(coalesce(p_borrower_first_name, '')), '');
+  v_input_last_name := nullif(trim(coalesce(p_borrower_last_name, '')), '');
+  v_input_address_line_1 := nullif(trim(coalesce(p_borrower_address_line_1, '')), '');
+  v_input_address_line_2 := nullif(trim(coalesce(p_borrower_address_line_2, '')), '');
+  v_input_state := nullif(trim(coalesce(p_borrower_state, '')), '');
+  v_input_country := nullif(trim(coalesce(p_borrower_country, '')), '');
+  v_input_postal_code := nullif(trim(coalesce(p_borrower_postal_code, '')), '');
+  v_input_phone := nullif(trim(coalesce(p_borrower_phone, '')), '');
+
+  select
+    nullif(
+      trim(
+        concat_ws(
+          ' ',
+          nullif(trim(coalesce(first_name, '')), ''),
+          nullif(trim(coalesce(last_name, '')), '')
+        )
+      ),
+      ''
+    ),
+    nullif(trim(coalesce(address_line_1, '')), ''),
+    nullif(trim(coalesce(address_line_2, '')), ''),
+    nullif(trim(coalesce(residence_state, '')), ''),
+    nullif(trim(coalesce(country, '')), ''),
+    nullif(trim(coalesce(postal_code, '')), ''),
+    nullif(trim(coalesce(phone_number, '')), '')
+  into
+    v_borrower_profile_name,
+    v_borrower_address_line_1,
+    v_borrower_address_line_2,
+    v_borrower_state,
+    v_borrower_country,
+    v_borrower_postal_code,
+    v_borrower_phone
+  from public.profiles
+  where id = auth.uid();
+
+  if v_input_first_name is not null and v_input_last_name is not null then
+    v_borrower_profile_name := concat_ws(' ', v_input_first_name, v_input_last_name);
+  end if;
+  if v_input_address_line_1 is not null then
+    v_borrower_address_line_1 := v_input_address_line_1;
+  end if;
+  if v_input_address_line_2 is not null then
+    v_borrower_address_line_2 := v_input_address_line_2;
+  end if;
+  if v_input_state is not null then
+    v_borrower_state := upper(v_input_state);
+  end if;
+  if v_input_country is not null then
+    v_borrower_country := v_input_country;
+  end if;
+  if v_input_postal_code is not null then
+    v_borrower_postal_code := v_input_postal_code;
+  end if;
+  if v_input_phone is not null then
+    v_borrower_phone := v_input_phone;
+  end if;
+
+  if v_borrower_profile_name is null
+     or v_borrower_address_line_1 is null
+     or v_borrower_state is null
+     or v_borrower_country is null
+     or v_borrower_postal_code is null
+     or v_borrower_phone is null then
+    raise exception 'Borrower identity details are required before signing';
+  end if;
+
   v_lender_snapshot := coalesce(
     nullif(trim(coalesce(v_loan.lender_name_snapshot, '')), ''),
     public.resolve_profile_full_name(v_loan.lender_id),
     'Lender'
   );
-  v_borrower_snapshot := coalesce(
-    nullif(trim(coalesce(v_loan.borrower_name_snapshot, '')), ''),
-    nullif(trim(coalesce(v_loan.borrower_name, '')), ''),
-    'Borrower'
-  );
+  v_borrower_snapshot := v_borrower_profile_name;
 
   update public.loans
     set borrower_signed_at = now(),
@@ -589,6 +733,7 @@ $$;
 
 grant execute on function public.lender_sign_loan(uuid, text, text) to authenticated;
 grant execute on function public.borrower_sign_loan(uuid, text) to authenticated;
+grant execute on function public.borrower_sign_loan_with_identity(uuid, text, text, text, text, text, text, text, text) to authenticated;
 grant execute on function public.transition_loan_status(uuid, text, text) to authenticated;
 
 
@@ -634,29 +779,34 @@ create policy "View Payments" on payments for select using (
   )
 );
 drop policy if exists "Add Payments" on payments;
+drop policy if exists "Authenticated Insert Payments" on payments;
 drop policy if exists "Borrower Add Repayments" on payments;
 drop policy if exists "Lender Add Funding" on payments;
-create policy "Borrower Add Repayments" on payments for insert with check (
-  type = 'repayment'
-  and status = 'pending'
-  and coalesce(created_by, 'user') = 'user'
-  and exists (
-    select 1
-    from loans
-    where loans.id = payments.loan_id
-      and loans.borrower_id = (select auth.uid())
-  )
-);
-create policy "Lender Add Funding" on payments for insert with check (
-  type = 'funding'
-  and status = 'approved'
-  and coalesce(created_by, 'user') = 'user'
-  and exists (
-    select 1
-    from loans
-    where loans.id = payments.loan_id
-      and loans.lender_id = (select auth.uid())
-      and loans.status = 'approved'
+create policy "Authenticated Insert Payments" on payments for insert to authenticated with check (
+  coalesce(created_by, 'user') = 'user'
+  and (
+    (
+      type = 'repayment'
+      and status = 'pending'
+      and exists (
+        select 1
+        from loans
+        where loans.id = payments.loan_id
+          and loans.borrower_id = (select auth.uid())
+      )
+    )
+    or
+    (
+      type = 'funding'
+      and status = 'approved'
+      and exists (
+        select 1
+        from loans
+        where loans.id = payments.loan_id
+          and loans.lender_id = (select auth.uid())
+          and loans.status = 'approved'
+      )
+    )
   )
 );
 create policy "Lender Updates Payments" on payments for update using (

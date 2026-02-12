@@ -236,50 +236,83 @@ struct LoanConstructionTermsStep: View {
 }
 
 struct LoanConstructionBorrowerStep: View {
-    @Binding var borrowerFirstName: String
-    @Binding var borrowerLastName: String
     @Binding var borrowerEmail: String
-    @Binding var borrowerPhone: String
-    let onImportContact: () -> Void
 
     var body: some View {
         VStack(spacing: 24) {
-            Text("Who is the borrower?")
+            Text("Who should receive this agreement?")
                 .font(.title2)
                 .bold()
                 .padding(.top)
 
-            Button {
-                onImportContact()
-            } label: {
-                HStack {
-                    Image(systemName: "person.crop.circle.badge.plus")
-                        .font(.title2)
-                    Text("Import from Contacts")
-                        .font(.headline)
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.lsPrimary)
-                .cornerRadius(16)
-            }
-            .padding(.horizontal)
-
             Form {
-                Section {
-                    TextField("First Name (Required)", text: $borrowerFirstName)
-                    TextField("Last Name (Required)", text: $borrowerLastName)
-                }
-
                 Section {
                     TextField("Email (Required)", text: $borrowerEmail)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
-                    TextField("Phone", text: $borrowerPhone)
-                        .keyboardType(.phonePad)
                 } footer: {
-                    Text("We'll verify their identity before anything is signed.")
+                    Text("Borrower will complete their own legal info before signing.")
+                }
+            }
+            .scrollContentBackground(.hidden)
+        }
+    }
+}
+
+struct LoanConstructionLenderStep: View {
+    @Binding var lenderFirstName: String
+    @Binding var lenderLastName: String
+    @Binding var lenderAddressLine1: String
+    @Binding var lenderAddressLine2: String
+    @Binding var lenderPhone: String
+    @Binding var lenderState: String
+    @Binding var lenderCountry: String
+    @Binding var lenderPostalCode: String
+    @Binding var saveLenderInfoForFuture: Bool
+
+    let usStates: [String]
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("Confirm your legal info")
+                .font(.title2)
+                .bold()
+                .padding(.top)
+
+            Form {
+                Section {
+                    TextField("Legal First Name", text: $lenderFirstName)
+                        .textInputAutocapitalization(.words)
+                    TextField("Legal Last Name", text: $lenderLastName)
+                        .textInputAutocapitalization(.words)
+                    TextField("Mobile Phone", text: $lenderPhone)
+                        .keyboardType(.phonePad)
+                } header: {
+                    Text("Personal Info")
+                }
+
+                Section {
+                    TextField("Address Line 1", text: $lenderAddressLine1)
+                        .textInputAutocapitalization(.words)
+                    TextField("Apt / Suite (Optional)", text: $lenderAddressLine2)
+                        .textInputAutocapitalization(.words)
+                    Picker("State of Residence", selection: $lenderState) {
+                        ForEach(usStates, id: \.self) { state in
+                            Text(state).tag(state)
+                        }
+                    }
+                    TextField("Country", text: $lenderCountry)
+                        .textInputAutocapitalization(.words)
+                    TextField("Postal Code / Index", text: $lenderPostalCode)
+                        .textInputAutocapitalization(.characters)
+                } header: {
+                    Text("Address")
+                } footer: {
+                    Text("These details are used for your lender signature snapshot.")
+                }
+
+                Section {
+                    Toggle("Save this info for future loans", isOn: $saveLenderInfoForFuture)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -294,8 +327,7 @@ struct LoanConstructionReviewStep: View {
     let maturityDate: Date
     let lateFeePolicy: String
     let lenderName: String
-    let borrowerFirstName: String
-    let borrowerLastName: String
+    let borrowerEmail: String
 
     var body: some View {
         VStack(spacing: 24) {
@@ -411,7 +443,7 @@ struct LoanConstructionReviewStep: View {
                                 .font(.caption2)
                                 .fontWeight(.bold)
                                 .foregroundStyle(.secondary)
-                            Text("\(borrowerFirstName) \(borrowerLastName)")
+                            Text(borrowerEmail)
                                 .font(.body)
                                 .fontWeight(.bold)
                         }

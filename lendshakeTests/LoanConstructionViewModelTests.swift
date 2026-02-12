@@ -35,14 +35,29 @@ struct LoanConstructionViewModelTests {
     @Test
     func borrowerValidationNormalizesEmail() {
         let vm = LoanConstructionViewModel()
-        vm.borrowerFirstName = "Jane"
-        vm.borrowerLastName = "Doe"
         vm.borrowerEmail = "  JANE.DOE@Example.COM  "
-        vm.borrowerPhone = ""
 
         let isValid = vm.validateBorrowerStep()
 
         #expect(isValid == true)
         #expect(vm.borrowerEmail == "jane.doe@example.com")
+    }
+
+    @MainActor
+    @Test
+    func lenderValidationRequiresCompleteIdentity() {
+        let vm = LoanConstructionViewModel()
+        vm.lenderFirstName = "John"
+        vm.lenderLastName = "Smith"
+        vm.lenderAddressLine1 = "123 Main St"
+        vm.lenderPhone = "555-123-4567"
+        vm.lenderState = "ca"
+        vm.lenderCountry = "United States"
+        vm.lenderPostalCode = "60601"
+
+        let isValid = vm.validateLenderStep()
+
+        #expect(isValid == true)
+        #expect(vm.lenderState == "CA")
     }
 }

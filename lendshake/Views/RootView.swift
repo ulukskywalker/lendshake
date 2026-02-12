@@ -18,11 +18,7 @@ struct RootView: View {
             if authManager.isLoading {
                 SplashLoadingView()
             } else if authManager.isAuthenticated {
-                if authManager.isProfileComplete {
-                    ContentView()
-                } else {
-                    ProfileSetupView()
-                }
+                ContentView()
             } else if authManager.awaitingEmailConfirmation {
                 VerificationWaitingView()
             } else {

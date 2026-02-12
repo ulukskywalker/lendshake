@@ -235,7 +235,7 @@ struct LoanCardView: View {
     
     var counterpartyName: String {
         if isLender {
-            return loan.borrower_name ?? "Unknown Borrower"
+            return loan.borrower_name_snapshot ?? loan.borrower_name ?? loan.borrower_email ?? "Unknown Borrower"
         } else {
             return fetchedLenderName ?? "Lender"
         }
