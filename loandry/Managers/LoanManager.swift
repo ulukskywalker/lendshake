@@ -230,10 +230,13 @@ class LoanManager {
         // Refresh local list
         try await fetchLoans()
         
-        logger.info("Loan draft created successfully")
-        return createdLoan
-    }
-    func signLoan(loan: Loan) async throws {
+                logger.info("Loan draft created successfully")
+        
+                return createdLoan
+        
+            }
+        
+            func signLoan(loan: Loan) async throws {
         self.isLoading = true
         defer { self.isLoading = false }
         

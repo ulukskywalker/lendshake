@@ -21,10 +21,7 @@ struct LoanConstructionView: View {
     @State private var createdLoan: Loan?
     @State private var showDatePickerPopover: Bool = false
     @State private var viewModel = LoanConstructionViewModel()
-    @State private var focusTask: Task<Void, Never>?
     @State private var didPrefillLenderProfile = false
-
-    @FocusState private var isPrincipalFieldFocused: Bool
 
     var body: some View {
         @Bindable var vm = viewModel
@@ -36,14 +33,7 @@ struct LoanConstructionView: View {
                 switch vm.currentStep {
                 case .amount:
                     LoanConstructionAmountStep(
-                        principalAmount: Binding(
-                            get: { vm.principalAmount },
-                            set: { vm.sanitizePrincipalInput($0) }
-                        ),
-                        principalFocus: $isPrincipalFieldFocused,
-                        amountInputFontSize: vm.amountInputFontSize,
-                        amountShakeTrigger: vm.amountShakeTrigger,
-                        onTapAmount: { isPrincipalFieldFocused = true }
+                        principalAmountValue: $vm.principalAmountValue
                     )
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
                 case .terms:
@@ -105,21 +95,9 @@ struct LoanConstructionView: View {
         .interactiveDismissDisabled(true)
         .onAppear {
             prefillLenderFromProfileIfNeeded(vm: vm)
-            schedulePrincipalAutoFocusIfNeeded()
         }
         .onChange(of: authManager.currentUserProfile?.updated_at) { _, _ in
             prefillLenderFromProfileIfNeeded(vm: vm)
-        }
-        .onChange(of: vm.currentStep) { _, newStep in
-            if newStep == .amount {
-                schedulePrincipalAutoFocusIfNeeded()
-            } else {
-                focusTask?.cancel()
-                isPrincipalFieldFocused = false
-            }
-        }
-        .onDisappear {
-            focusTask?.cancel()
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -184,7 +162,7 @@ struct LoanConstructionView: View {
             Button {
                 handleNext(vm: vm)
             } label: {
-                Text(vm.currentStep == .review ? (createdLoan != nil ? "View Draft" : "Create Draft") : "Next")
+                Text(vm.currentStep == .review ? (createdLoan != nil ? "View Loan" : "Create & Send") : "Next")
                     .font(.headline)
                     .bold()
                     .foregroundColor(.white)
@@ -268,6 +246,7 @@ struct LoanConstructionView: View {
         guard let principal = Double(vm.principalAmount) else { return }
         let interest = Double(vm.interestRate) ?? 0.0
         do {
+            // 1. Create the loan with .draft status
             let newLoan = try await loanManager.createDraftLoan(
                 principal: principal,
                 interest: interest,
@@ -278,26 +257,16 @@ struct LoanConstructionView: View {
                 borrowerEmail: vm.borrowerEmail,
                 borrowerPhone: nil
             )
+            
+            // 2. Lender immediately signs it, transitioning status to .sent
+            try await loanManager.signLoan(loan: newLoan)
 
             createdLoan = newLoan
             onLoanCreated?(newLoan)
             dismiss()
 
         } catch {
-            vm.errorMessage = "Failed to create: \(error.localizedDescription)"
-        }
-    }
-
-    private func schedulePrincipalAutoFocusIfNeeded() {
-        focusTask?.cancel()
-        guard viewModel.currentStep == .amount else { return }
-        focusTask = Task {
-            // Let sheet/fullScreen transition finish before opening keyboard.
-            try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled, viewModel.currentStep == .amount else { return }
-            await MainActor.run {
-                isPrincipalFieldFocused = true
-            }
+            vm.errorMessage = "Failed to create & send: \(error.localizedDescription)"
         }
     }
 

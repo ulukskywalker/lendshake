@@ -16,6 +16,11 @@ import UIKit
 final class LoanConstructionViewModel {
     var currentStep: LoanConstructionWizardStep = .amount
 
+    var principalAmountValue: Double = 0.0 {
+        didSet {
+            principalAmount = String(format: "%.2f", principalAmountValue)
+        }
+    }
     var principalAmount: String = ""
     var interestRate: String = "0.0"
     var interestSliderValue: Double = 0.0

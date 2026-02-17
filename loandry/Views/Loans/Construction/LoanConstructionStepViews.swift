@@ -8,41 +8,17 @@
 import SwiftUI
 
 struct LoanConstructionAmountStep: View {
-    @Binding var principalAmount: String
-    let principalFocus: FocusState<Bool>.Binding
-    let amountInputFontSize: CGFloat
-    let amountShakeTrigger: CGFloat
-    let onTapAmount: () -> Void
+    @Binding var principalAmountValue: Double
 
     var body: some View {
         VStack(spacing: 30) {
             Spacer()
 
-            Text("How much are you lending?")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("$")
-                    .font(.system(size: amountInputFontSize, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-
-                TextField("0", text: $principalAmount)
-                    .font(.system(size: amountInputFontSize, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .keyboardType(.decimalPad)
-                    .focused(principalFocus)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(1)
-                    .frame(minWidth: 80, maxWidth: 220)
-            }
-            .modifier(ShakeEffect(animatableData: amountShakeTrigger))
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onTapAmount()
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(maxWidth: 320)
+            CircularAmountDial(
+                value: $principalAmountValue,
+                maxValue: 10000,
+                tintColor: .lsPrimary
+            )
 
             LoanConstructionTipCard(
                 title: "Quick tip",
@@ -50,7 +26,6 @@ struct LoanConstructionAmountStep: View {
             )
             .padding(.horizontal, 24)
 
-            Spacer()
             Spacer()
             Spacer()
         }
@@ -330,133 +305,142 @@ struct LoanConstructionReviewStep: View {
     let borrowerEmail: String
 
     var body: some View {
-        VStack(spacing: 24) {
-            Text("Does this look right?")
-                .font(.title2)
-                .bold()
-                .padding(.top)
+        ScrollView {
+            VStack(spacing: 24) {
+                Text("Does this look right?")
+                    .font(.title2)
+                    .bold()
+                    .padding(.top)
 
-            VStack(spacing: 0) {
-                VStack(spacing: 12) {
-                    Text("PROMISSORY NOTE")
-                        .font(.caption)
-                        .bold()
-                        .tracking(3)
-                        .foregroundStyle(.secondary)
-                        .padding(.top)
-
-                    Text("\(Double(principalAmount)?.formatted(.currency(code: "USD")) ?? "$0")")
-                        .font(.system(size: 48, weight: .heavy, design: .rounded))
-                        .foregroundStyle(Color.lsPrimary)
-                        .shadow(color: Color.lsPrimary.opacity(0.3), radius: 8, x: 0, y: 4)
-
-                    if (Double(interestRate) ?? 0) == 0 {
-                        Text("FAMILY RATE (0%)")
+                VStack(spacing: 0) {
+                    VStack(spacing: 12) {
+                        Text("PROMISSORY NOTE")
                             .font(.caption)
-                            .fontWeight(.bold)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.green.opacity(0.1))
-                            .foregroundStyle(.green)
-                            .cornerRadius(20)
-                    } else {
-                        Text("\(interestRate)% ANNUAL INTEREST")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.orange.opacity(0.1))
-                            .foregroundStyle(.orange)
-                            .cornerRadius(20)
-                    }
-                }
-                .padding(.vertical, 30)
-                .frame(maxWidth: .infinity)
-                .background(Color.lsCardBackground)
+                            .bold()
+                            .tracking(3)
+                            .foregroundStyle(.secondary)
+                            .padding(.top)
 
-                Divider()
+                        Text("\(Double(principalAmount)?.formatted(.currency(code: "USD")) ?? "$0")")
+                            .font(.system(size: 48, weight: .heavy, design: .rounded))
+                            .foregroundStyle(Color.lsPrimary)
+                            .shadow(color: Color.lsPrimary.opacity(0.3), radius: 8, x: 0, y: 4)
 
-                VStack(spacing: 20) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("REPAYMENT")
-                                .font(.caption2)
+                        if (Double(interestRate) ?? 0) == 0 {
+                            Text("FAMILY RATE (0%)")
+                                .font(.caption)
                                 .fontWeight(.bold)
-                                .foregroundStyle(.secondary)
-                            Text(repaymentSchedule.rawValue)
-                                .font(.body)
-                                .fontWeight(.semibold)
-                        }
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text("MATURITY DATE")
-                                .font(.caption2)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.green.opacity(0.1))
+                                .foregroundStyle(.green)
+                                .cornerRadius(20)
+                        } else {
+                            Text("\(interestRate)% ANNUAL INTEREST")
+                                .font(.caption)
                                 .fontWeight(.bold)
-                                .foregroundStyle(.secondary)
-                            Text(maturityDate.formatted(date: .abbreviated, time: .omitted))
-                                .font(.body)
-                                .fontWeight(.semibold)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.orange.opacity(0.1))
+                                .foregroundStyle(.orange)
+                                .cornerRadius(20)
                         }
                     }
+                    .padding(.vertical, 30)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.lsCardBackground)
 
-                    Divider().opacity(0.5)
+                    Divider()
 
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("LATE FEE POLICY")
-                                .font(.caption2)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.secondary)
-                            if let fee = Double(lateFeePolicy), fee > 0 {
-                                Text("\(fee.formatted(.currency(code: "USD"))) after grace period")
-                                    .font(.body)
-                                    .fontWeight(.semibold)
-                            } else {
-                                Text("No Late Fee")
-                                    .font(.body)
-                                    .fontWeight(.semibold)
+                    VStack(spacing: 20) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("REPAYMENT")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
                                     .foregroundStyle(.secondary)
+                                Text(repaymentSchedule.rawValue)
+                                    .font(.body)
+                                    .fontWeight(.semibold)
+                            }
+
+                            Spacer()
+
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text("MATURITY DATE")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.secondary)
+                                Text(maturityDate.formatted(date: .abbreviated, time: .omitted))
+                                    .font(.body)
+                                    .fontWeight(.semibold)
                             }
                         }
-                        Spacer()
-                    }
 
-                    Divider().opacity(0.5)
+                        Divider().opacity(0.5)
 
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("LENDER")
-                                .font(.caption2)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.secondary)
-                            Text(lenderName)
-                                .font(.body)
-                                .fontWeight(.bold)
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("LATE FEE POLICY")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.secondary)
+                                if let fee = Double(lateFeePolicy), fee > 0 {
+                                    Text("\(fee.formatted(.currency(code: "USD"))) after grace period")
+                                        .font(.body)
+                                        .fontWeight(.semibold)
+                                } else {
+                                    Text("No Late Fee")
+                                        .font(.body)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
                         }
 
-                        Spacer()
+                        Divider().opacity(0.5)
 
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text("BORROWER")
-                                .font(.caption2)
-                                .fontWeight(.bold)
-                                .foregroundStyle(.secondary)
-                            Text(borrowerEmail)
-                                .font(.body)
-                                .fontWeight(.bold)
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("LENDER")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.secondary)
+                                Text(lenderName)
+                                    .font(.body)
+                                    .fontWeight(.bold)
+                            }
+
+                            Spacer()
+
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text("BORROWER")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.secondary)
+                                Text(borrowerEmail)
+                                    .font(.body)
+                                    .fontWeight(.bold)
+                            }
                         }
                     }
+                    .padding(24)
+                    .background(Color.gray.opacity(0.04))
                 }
-                .padding(24)
-                .background(Color.gray.opacity(0.04))
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(color: .black.opacity(0.08), radius: 15, x: 0, y: 5)
-            .padding(.horizontal, 24)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: .black.opacity(0.08), radius: 15, x: 0, y: 5)
+                .padding(.horizontal, 24)
+                
+                LoanConstructionTipCard(
+                    title: "Final Step",
+                    message: "Clicking 'Create & Send' will sign the agreement as the lender and send it to the borrower to sign."
+                )
+                .padding(.horizontal, 24)
+                .padding(.top)
 
-            Spacer()
+                Spacer()
+            }
         }
     }
 }
