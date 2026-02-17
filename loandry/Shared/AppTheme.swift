@@ -8,10 +8,11 @@
 import SwiftUI
 
 extension Color {
-    static let lsPrimary = Color.blue // Standard Apple Blue
-    static let lsSecondary = Color.cyan // Fresh complementary blue
-    static let lsBackground = Color(uiColor: .systemGroupedBackground) // Adaptive background
-    static let lsCardBackground = Color(uiColor: .secondarySystemGroupedBackground) // Adaptive card background (White / Dark Gray)
-    static let lsTextPrimary = Color.primary // Use system primary
-    static let lsTextSecondary = Color.secondary // Use system secondary
+    // Brand Colors (Using System Defaults)
+    static let blueBrand = Color.blue
+    static let cyanBrand = Color.cyan
+    
+    // Semantic Backgrounds
+    static let appBackground = Color(uiColor: .systemGroupedBackground)
+    static let cardBackground = Color(uiColor: .secondarySystemGroupedBackground)
 }

@@ -116,6 +116,7 @@ struct Loan: Codable, Identifiable, Hashable {
     let repayment_schedule: String
     let late_fee_policy: String
     let maturity_date: Date
+    let first_payment_date: Date?
     let borrower_name: String?
     let borrower_email: String?
     let borrower_phone: String?
@@ -145,6 +146,7 @@ struct Loan: Codable, Identifiable, Hashable {
         schedule: String,
         lateFee: String,
         maturity: Date,
+        firstPaymentDate: Date? = nil,
         borrowerName: String?,
         borrowerEmail: String?,
         borrowerPhone: String?,
@@ -159,6 +161,7 @@ struct Loan: Codable, Identifiable, Hashable {
         self.repayment_schedule = schedule
         self.late_fee_policy = lateFee
         self.maturity_date = maturity
+        self.first_payment_date = firstPaymentDate
         self.borrower_name = borrowerName
         self.borrower_email = borrowerEmail
         self.borrower_phone = borrowerPhone
@@ -179,16 +182,18 @@ struct Loan: Codable, Identifiable, Hashable {
     // MARK: - Payment Helpers
     
     var nextPaymentDate: Date {
+        if let first = first_payment_date, first > Date() {
+            return first
+        }
+        
         let schedule = repayment_schedule.lowercased()
         if schedule.contains("month") {
-            // Find next date matching the 'day' of creation?
-            // Or simply next month from today?
-            // Let's go with: Next Month Anniversary from Today
+            // Find next date matching the 'day' of creation or first payment
             let calendar = Calendar.current
-            let start = created_at ?? Date()
+            let anchorDate = first_payment_date ?? created_at ?? Date()
             
-            // Get the day component of the start date (e.g., 5th)
-            let dayComponent = calendar.component(.day, from: start)
+            // Get the day component of the anchor date (e.g., 5th)
+            let dayComponent = calendar.component(.day, from: anchorDate)
             
             // Get today components
             let today = Date()

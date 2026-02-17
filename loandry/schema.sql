@@ -1128,7 +1128,7 @@ begin
       'system'
     from (
       select generate_series(
-        coalesce(v_loan.created_at, now()) + interval '1 month',
+        coalesce(v_loan.first_payment_date, v_loan.created_at + interval '1 month'),
         p_as_of,
         interval '1 month'
       ) as due_at
@@ -1168,7 +1168,7 @@ begin
           gs.due_at as period_end
         from (
           select generate_series(
-            coalesce(v_loan.created_at, now()) + v_cycle_interval,
+            coalesce(v_loan.first_payment_date, v_loan.created_at + v_cycle_interval),
             p_as_of,
             v_cycle_interval
           ) as due_at
@@ -1517,3 +1517,10 @@ create policy "Select Own Feedback" on public.app_feedback
 for select
 to authenticated
 using ((select auth.uid()) = user_id);
+-- ==========================================
+-- 6. SCHEMA MIGRATIONS
+-- ==========================================
+
+-- 6.1 Add first_payment_date to loans
+alter table public.loans 
+add column if not exists first_payment_date timestamptz;
