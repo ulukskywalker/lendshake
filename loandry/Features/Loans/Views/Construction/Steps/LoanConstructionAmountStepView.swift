@@ -5,6 +5,16 @@ struct LoanConstructionAmountStepView: View {
 
     var body: some View {
         VStack(spacing: 30) {
+            VStack(spacing: 8) {
+                Text("Loan Amount")
+                    .font(.title2)
+                    .bold()
+                Text("How much are you lending?")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top)
+            
             Spacer()
 
             CircularAmountDialView(
@@ -13,14 +23,9 @@ struct LoanConstructionAmountStepView: View {
                 tintColor: .blue
             )
 
-            LoanConstructionTipCardView(
-                title: "Quick tip",
-                message: "We keep loans up to $10,000 so agreements stay simple, personal, and easy to manage."
-            )
-            .padding(.horizontal, 24)
-
-            Spacer()
             Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.appBackground)
     }
 }

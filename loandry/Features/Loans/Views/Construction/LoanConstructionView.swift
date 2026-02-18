@@ -21,6 +21,7 @@ struct LoanConstructionView: View {
     @State private var createdLoan: Loan?
     @State private var showDatePickerPopover: Bool = false
     @State private var didPrefillLenderProfile = false
+    @State private var showHelp: Bool = false
     
     // Step State
     @State private var currentStep: LoanConstructionWizardStep = .amount
@@ -44,7 +45,7 @@ struct LoanConstructionView: View {
     @State private var borrowerEmail: String = ""
     @State private var lateFeeSliderValue: Double = 0
 
-    @State private var amountShakeTrigger: CGFloat = 0
+
     @State private var errorMessage: String?
 
     // Local transient string state for text field inputs to prevent jumpy sliders
@@ -52,8 +53,11 @@ struct LoanConstructionView: View {
     @State private var lateFeeInput: String = "0"
 
     private let maxPrincipalAmount: Double = 10_000
-    private let maxPrincipalMessage: String = "Only $10,000 is allowed."
+
     private let maxInterestRate: Double = 15
+
+    // Navigation State
+    @State private var isMovingForward: Bool = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,23 +69,27 @@ struct LoanConstructionView: View {
                     LoanConstructionAmountStepView(
                         principalAmountValue: $principalAmountValue
                     )
-                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
-                case .terms:
-                    LoanConstructionTermsStepView(
+                    .transition(pageTransition)
+                case .dates:
+                    LoanConstructionDatesStepView(
                         repaymentSchedule: $repaymentSchedule,
-                        interestRate: $interestRateInput,
-                        interestSliderValue: $interestSliderValue,
                         maturityDate: $maturityDate,
                         firstPaymentDate: $firstPaymentDate,
                         showDatePickerPopover: $showDatePickerPopover,
+                        onScheduleChange: handleRepaymentScheduleChange
+                    )
+                    .transition(pageTransition)
+                case .costs:
+                    LoanConstructionCostsStepView(
+                        interestRate: $interestRateInput,
+                        interestSliderValue: $interestSliderValue,
                         lateFeePolicy: $lateFeeInput,
                         lateFeeSliderValue: $lateFeeSliderValue,
-                        onScheduleChange: handleRepaymentScheduleChange,
                         onInterestTextChange: sanitizeInterestValue,
                         onInterestSliderChange: handleInterestSliderChange,
                         onLateFeeSliderChange: handleLateFeeSliderChange
                     )
-                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    .transition(pageTransition)
                 case .lender:
                     LoanConstructionLenderStepView(
                         lenderFirstName: $lenderFirstName,
@@ -95,12 +103,12 @@ struct LoanConstructionView: View {
                         saveLenderInfoForFuture: $saveLenderInfoForFuture,
                         usStates: ProfileReferenceData.usStates
                     )
-                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    .transition(pageTransition)
                 case .borrower:
                     LoanConstructionBorrowerStepView(
                         borrowerEmail: $borrowerEmail
                     )
-                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    .transition(pageTransition)
                 case .review:
                     LoanConstructionReviewStepView(
                         principalAmount: principalAmount,
@@ -112,7 +120,7 @@ struct LoanConstructionView: View {
                         lenderName: "\(lenderFirstName) \(lenderLastName)".trimmingCharacters(in: .whitespaces),
                         borrowerEmail: borrowerEmail
                     )
-                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+                    .transition(pageTransition)
                 }
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: currentStep)
@@ -138,38 +146,83 @@ struct LoanConstructionView: View {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showHelp = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+            }
+        }
+        .alert(currentStep.title, isPresented: $showHelp) {
+            Button("Got it", role: .cancel) { }
+        } message: {
+            Text(currentStep.helpMessage)
         }
         .overlay(alignment: .top) {
             if let error = errorMessage {
                 Text(error)
-                    .font(.caption)
-                    .bold()
-                    .foregroundColor(.white)
-                    .padding()
-                    .background(Color.red.cornerRadius(8))
-                    .padding(.top, 10)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                            withAnimation { errorMessage = nil }
-                        }
+                .font(.caption)
+                .bold()
+                .foregroundColor(.white)
+                .padding()
+                .background(Color.red.cornerRadius(8))
+                .padding(.top, 10)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        withAnimation { errorMessage = nil }
                     }
+                }
             }
+        }
+    }
+
+    @Namespace private var animationNamespace
+    
+    // Dynamic transition based on direction
+    private var pageTransition: AnyTransition {
+        if isMovingForward {
+            return .asymmetric(
+                insertion: .move(edge: .trailing),
+                removal: .move(edge: .leading)
+            )
+        } else {
+            return .asymmetric(
+                insertion: .move(edge: .leading),
+                removal: .move(edge: .trailing)
+            )
         }
     }
 
     @ViewBuilder
     private func stepHeader() -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 12) {
             ForEach(LoanConstructionWizardStep.allCases, id: \.self) { step in
-                Rectangle()
-                    .fill(step.rawValue <= currentStep.rawValue ? Color.blue : Color.gray.opacity(0.2))
-                    .frame(height: 4)
-                    .cornerRadius(2)
+                ZStack {
+                    if step == currentStep {
+                        Circle()
+                            .fill(Color.blue.opacity(0.1))
+                            .matchedGeometryEffect(id: "stepBackground", in: animationNamespace)
+                            .frame(width: 32, height: 32)
+                    }
+                    
+                    Image(systemName: step.icon)
+                        .font(.system(size: 14, weight: step == currentStep ? .bold : .regular))
+                        .foregroundStyle(step.rawValue <= currentStep.rawValue ? Color.blue : Color.secondary.opacity(0.5))
+                        .frame(width: 32, height: 32)
+                }
+                .onTapGesture {
+                    if step.rawValue < currentStep.rawValue {
+                        isMovingForward = false
+                        withAnimation { currentStep = step }
+                    }
+                }
             }
         }
-        .padding(.horizontal)
-        .padding(.top, 8)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(Color.appBackground)
     }
 
     @ViewBuilder
@@ -177,6 +230,7 @@ struct LoanConstructionView: View {
         HStack {
             if currentStep != .amount {
                 Button {
+                    isMovingForward = false
                     withAnimation {
                         let prev = currentStep.rawValue - 1
                         if let s = LoanConstructionWizardStep(rawValue: prev) { currentStep = s }
@@ -193,7 +247,7 @@ struct LoanConstructionView: View {
             }
 
             Spacer()
-
+            
             Button {
                 handleNext()
             } label: {
@@ -201,28 +255,33 @@ struct LoanConstructionView: View {
                     .font(.headline)
                     .bold()
                     .foregroundColor(.white)
-                    .frame(width: 160, height: 50)
+                    .frame(width: 160, height: 44)
                     .background(Color.blue)
-                    .cornerRadius(25)
-                    .shadow(color: Color.blue.opacity(0.3), radius: 5, x: 0, y: 3)
+                    .cornerRadius(22)
             }
             .disabled(loanManager.isLoading)
 
             Spacer()
             Spacer().frame(width: 50)
         }
-        .padding()
-        .background(Color.cardBackground.ignoresSafeArea(edges: .bottom))
+        .padding(8)
+        .padding(.bottom, 4) // extra bottom padding for home indicator
+        .background(Color.appBackground)
     }
 
     private func handleNext() {
+        isMovingForward = true
         switch currentStep {
         case .amount:
             guard validateAmountStep() else { return }
-            withAnimation { currentStep = .terms }
+            withAnimation { currentStep = .dates }
 
-        case .terms:
-            guard validateTermsStep() else { return }
+        case .dates:
+            guard validateDatesStep() else { return }
+            withAnimation { currentStep = .costs }
+
+        case .costs:
+            guard validateCostsStep() else { return }
             withAnimation { currentStep = .lender }
 
         case .lender:
@@ -275,7 +334,8 @@ struct LoanConstructionView: View {
         }
 
         guard validateAmountStep(),
-              validateTermsStep(),
+              validateDatesStep(),
+              validateCostsStep(),
               validateLenderStep(),
               validateBorrowerStep() else { return }
         guard let principal = Double(principalAmount) else { return }
@@ -352,7 +412,15 @@ struct LoanConstructionView: View {
         return true
     }
 
-    private func validateTermsStep() -> Bool {
+    private func validateDatesStep() -> Bool {
+        guard maturityDate >= Calendar.current.startOfDay(for: Date()) else {
+            errorMessage = "Final due date cannot be in the past."
+            return false
+        }
+        return true
+    }
+
+    private func validateCostsStep() -> Bool {
         guard interestSliderValue >= 0 else {
             errorMessage = "Interest rate must be 0 or higher."
             return false
@@ -364,11 +432,6 @@ struct LoanConstructionView: View {
 
         guard lateFeeSliderValue >= 0 else {
             errorMessage = "Late fee must be 0 or higher."
-            return false
-        }
-
-        guard maturityDate >= Calendar.current.startOfDay(for: Date()) else {
-            errorMessage = "Final due date cannot be in the past."
             return false
         }
 
