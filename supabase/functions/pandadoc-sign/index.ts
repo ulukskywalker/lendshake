@@ -110,10 +110,10 @@ serve(async (req: Request) => {
                 // For simplicity, we just trigger send. PandaDoc usually queues it. 
                 // Sometimes you need to delay slightly or check status, but let's try direct send.
 
-                // 3. Send Document
+                // 3. Send Document Silently (Enforce App Login)
                 await pandaDocRequest("POST", `/documents/${docId}/send`, {
                     message: "Please sign this loan agreement via Loandry.",
-                    silent: false
+                    silent: true
                 });
 
                 // 4. Update Supabase with Document ID
@@ -135,7 +135,25 @@ serve(async (req: Request) => {
                 });
             }
 
-            // 2. Webhook Handler
+            // 3. Session Generation (For Embedded Sign)
+            if (path === "session" && req.method === "POST") {
+                const { doc_id, recipient_email } = await req.json();
+                if (!doc_id || !recipient_email) throw new Error("doc_id and recipient_email required");
+
+                const session = await pandaDocRequest("POST", `/documents/${doc_id}/sessions`, {
+                    recipient: recipient_email
+                });
+
+                return new Response(JSON.stringify({
+                    success: true,
+                    session_id: session.id,
+                    signing_url: `https://app.pandadoc.com/s/${session.id}`
+                }), {
+                    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+                });
+            }
+
+            // 4. Webhook Handler
             if (path === "webhook" && req.method === "POST") {
                 const event = await req.json();
                 // event usually contains [{ event: 'document_state_changed', data: { ... } }]

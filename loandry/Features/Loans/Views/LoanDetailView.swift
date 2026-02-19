@@ -168,21 +168,41 @@ struct LoanDetailView: View {
 
     @ViewBuilder
     private var sentActions: some View {
-        VStack(spacing: 8) {
-            Text(isLender ? "Waiting for Borrower to Sign" : "Please check your email")
-                .font(.headline)
-            Text(isLender ? "They received an email from PandaDoc." : "Sign the agreement via the link sent by PandaDoc.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        if isLender {
+            VStack(spacing: 8) {
+                Text("Waiting for Borrower to Sign")
+                    .font(.headline)
+                Text("They must sign the agreement through their Loandry account.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.blue.opacity(0.05))
+            .lsCardContainer()
+        } else {
+            VStack(spacing: 16) {
+                VStack(spacing: 8) {
+                    Text("Signature Required")
+                        .font(.headline)
+                    Text("Ready to make this official? Review and sign the contract below.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                
+                Button {
+                    Task { await openSigningURL() }
+                } label: {
+                    Label("Sign Loan Agreement", systemImage: "signature")
+                        .lsPrimaryButton()
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.blue.opacity(0.05))
+            .lsCardContainer()
         }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(Color.blue.opacity(0.05))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.blue.opacity(0.2), lineWidth: 1)
-        )
     }
 
     @ViewBuilder
@@ -358,6 +378,16 @@ struct LoanDetailView: View {
             try await loanManager.transitionLoanStatus(liveLoan, status: .cancelled, reason: reason)
             showAgreementRejectionReasonSheet = false
         } catch { errorMsg = loanManager.friendlyTransitionErrorMessage(error); showError = true }
+    }
+
+    private func openSigningURL() async {
+        do {
+            let url = try await loanManager.generatePandaDocSigningURL(loan: liveLoan)
+            await UIApplication.shared.open(url, options: [:])
+        } catch {
+            errorMsg = "Could not generate signing link: \(error.localizedDescription)"
+            showError = true
+        }
     }
 
     // MARK: - Realtime

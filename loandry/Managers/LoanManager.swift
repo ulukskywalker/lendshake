@@ -200,6 +200,31 @@ class LoanManager {
          }
     }
     
+    func generatePandaDocSigningURL(loan: Loan) async throws -> URL {
+        guard let docId = loan.t_pandadoc_id, let borrowerEmail = loan.borrower_email else {
+            throw NSError(domain: "LoanManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Loan not processed for PandaDoc signing yet."])
+        }
+
+        struct SessionPayload: Encodable {
+            let doc_id: String
+            let recipient_email: String
+        }
+        
+        struct SessionResponse: Decodable {
+            let success: Bool
+            let signing_url: String
+        }
+
+        let payload = SessionPayload(doc_id: docId, recipient_email: borrowerEmail)
+        let response: SessionResponse = try await supabase.functions.invoke("pandadoc-sign/session", options: FunctionInvokeOptions(body: payload))
+        
+        guard let url = URL(string: response.signing_url) else {
+            throw NSError(domain: "LoanManager", code: 500, userInfo: [NSLocalizedDescriptionKey: "Invalid signing URL returned from server."])
+        }
+        
+        return url
+    }
+    
     func signLoanAsBorrower(loan: Loan, firstName: String, lastName: String, addressLine1: String, addressLine2: String, state: String, country: String, postalCode: String, phoneNumber: String) async throws {
         guard let user = supabase.auth.currentUser, let loanId = loan.id else { throw AuthError.notAuthenticated }
         guard loan.lender_id != user.id else { throw NSError(domain: "LoanManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Lender cannot sign as borrower."]) }
