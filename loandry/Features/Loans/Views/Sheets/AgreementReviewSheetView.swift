@@ -20,23 +20,61 @@ struct AgreementReviewSheetView: View {
         loan.agreement_text ?? AgreementUtility.generate(for: loan)
     }
 
+    @State private var pdfURL: URL?
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(agreementText)
-                    .padding()
-                    .font(.system(.body, design: .monospaced))
+                if let pdfURL {
+                    VStack(spacing: 20) {
+                        Image(systemName: "doc.text.fill")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.blue)
+                        Text("Signed Agreement Available")
+                            .font(.title2.bold())
+                        
+                        Link(destination: pdfURL) {
+                            Label("Open PDF", systemImage: "arrow.up.right.square")
+                                .font(.headline)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.blue)
+                                .foregroundColor(.white)
+                                .cornerRadius(10)
+                        }
+                        .padding(.horizontal)
+                        
+                        ShareLink(item: pdfURL) {
+                            Label("Share / Save PDF", systemImage: "square.and.arrow.up")
+                                .font(.headline)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.secondary.opacity(0.2))
+                                .foregroundColor(.primary)
+                                .cornerRadius(10)
+                        }
+                        .padding(.horizontal)
+                    }
+                    .padding(.top, 40)
+                } else {
+                    Text(agreementText)
+                        .padding()
+                        .font(.system(.body, design: .monospaced))
+                }
             }
             .navigationTitle("Legal Agreement")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { isPresented = false }
                 }
-                ToolbarItem(placement: .topBarLeading) {
-                    ShareLink(item: agreementText)
+                
+                if pdfURL == nil {
+                    ToolbarItem(placement: .topBarLeading) {
+                        ShareLink(item: agreementText)
+                    }
                 }
                 
-                if isLender && loan.status == .draft && loan.lender_signed_at == nil {
+                if isLender && loan.status == .draft && loan.lender_signed_at == nil && pdfURL == nil {
                     ToolbarItem(placement: .confirmationAction) {
                         Button {
                             Task { await sign() }
@@ -48,6 +86,15 @@ struct AgreementReviewSheetView: View {
                             }
                         }
                         .disabled(isSigning)
+                    }
+                }
+            }
+            .task {
+                if let path = loan.agreement_url {
+                    do {
+                        pdfURL = try await loanManager.fetchAgreementURL(path: path)
+                    } catch {
+                        errorMessage = "Failed to load PDF: \(error.localizedDescription)"
                     }
                 }
             }

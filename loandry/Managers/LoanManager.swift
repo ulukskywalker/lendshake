@@ -60,7 +60,10 @@ class LoanManager {
                 .or("status.eq.\(PaymentStatus.pending.rawValue),status.eq.\(PaymentStatus.rejected.rawValue),status.eq.\(PaymentStatus.approved.rawValue)")
                 .eq("type", value: PaymentType.repayment.rawValue).execute().value
             processAttentionPayments(attentionPayments, lenderIDs: lenderIDs, borrowerIDs: borrowerIDs)
-        } catch { resetActionCounts() }
+        } catch { 
+            await AlertReporter.shared.capture(error: error, category: .loans, summary: "Failed to refresh action counts", severity: .critical)
+            resetActionCounts() 
+        }
     }
     
     private func resetActionCounts() {
@@ -88,7 +91,7 @@ class LoanManager {
         requiredActionCount = countLoanWorkflowActions(for: user) + pendingApprovalCount + rejectedRepaymentsByLoanID.count
     }
 
-    private func countLoanWorkflowActions(for user: User) -> Int {
+    private func countLoanWorkflowActions(for user: Supabase.User) -> Int {
         loans.reduce(into: 0) { count, loan in
             let isLender = loan.lender_id == user.id
             switch loan.status {
@@ -117,22 +120,32 @@ class LoanManager {
     
     func createDraftLoan(principal: Double, interest: Double, schedule: String, lateFee: String, maturity: Date, firstPaymentDate: Date, borrowerName: String?, borrowerEmail: String?, borrowerPhone: String?) async throws -> Loan {
         guard let user = supabase.auth.currentUser else { throw AuthError.notAuthenticated }
-        let loan = Loan(lenderId: user.id, principal: principal, interest: interest, schedule: schedule, lateFee: lateFee, maturity: maturity, firstPaymentDate: firstPaymentDate, borrowerName: borrowerName, borrowerEmail: borrowerEmail, borrowerPhone: borrowerPhone)
-        let created = try await service.createLoan(loan)
-        try await fetchLoans(); return created
+        do {
+            let loan = Loan(lenderId: user.id, principal: principal, interest: interest, schedule: schedule, lateFee: lateFee, maturity: maturity, firstPaymentDate: firstPaymentDate, borrowerName: borrowerName, borrowerEmail: borrowerEmail, borrowerPhone: borrowerPhone)
+            let created = try await service.createLoan(loan)
+            try await fetchLoans(); return created
+        } catch {
+            await AlertReporter.shared.capture(error: error, category: .loans, summary: "Failed to create draft loan", severity: .critical)
+            throw error
+        }
     }
     
     func signLoan(loan: Loan) async throws {
         // Legacy internal signing logic kept if needed, but for PandaDoc flow:
         guard let user = supabase.auth.currentUser, let loanId = loan.id else { throw AuthError.notAuthenticated }
-        let ip = await fetchPublicIP(); let isLender = (loan.lender_id == user.id)
-        if isLender {
-            let text = AgreementUtility.generate(for: loan)
-            try await supabase.rpc("lender_sign_loan", params: ["p_loan_id": loanId.uuidString, "p_agreement_text": text, "p_lender_ip": ip ?? ""]).execute()
-        } else {
-            try await supabase.rpc("borrower_sign_loan", params: ["p_loan_id": loanId.uuidString, "p_borrower_ip": ip ?? ""]).execute()
+        do {
+            let ip = await fetchPublicIP(); let isLender = (loan.lender_id == user.id)
+            if isLender {
+                let text = AgreementUtility.generate(for: loan)
+                try await supabase.rpc("lender_sign_loan", params: ["p_loan_id": loanId.uuidString, "p_agreement_text": text, "p_lender_ip": ip ?? ""]).execute()
+            } else {
+                try await supabase.rpc("borrower_sign_loan", params: ["p_loan_id": loanId.uuidString, "p_borrower_ip": ip ?? ""]).execute()
+            }
+            try await fetchLoans()
+        } catch {
+            await AlertReporter.shared.capture(error: error, category: .loans, summary: "Failed to sign loan", severity: .critical)
+            throw error
         }
-        try await fetchLoans()
     }
     
     func sendForSignature(loan: Loan) async throws {
@@ -153,14 +166,14 @@ class LoanManager {
          // Try to resolve borrower state
          var borrowerState: String? = nil
          if let borrowerID = loan.borrower_id {
-             let profile = try? await supabase.from("profiles").select().eq("id", value: borrowerID).single().execute().value as Profile
+             let profile: AuthManager.UserProfile? = try? await supabase.from("profiles").select().eq("id", value: borrowerID).single().execute().value
              borrowerState = profile?.residence_state
          }
          
          // Resolve lender state (current user)
          var lenderState: String? = nil
          if let lenderID = supabase.auth.currentUser?.id {
-             let profile = try? await supabase.from("profiles").select().eq("id", value: lenderID).single().execute().value as Profile
+             let profile: AuthManager.UserProfile? = try? await supabase.from("profiles").select().eq("id", value: lenderID).single().execute().value
              lenderState = profile?.residence_state
          }
          
@@ -176,25 +189,50 @@ class LoanManager {
              lender_state: lenderState
          )
          
-         _ = try await supabase.functions.invoke("pandadoc-sign/send", options: FunctionInvokeOptions(body: payload))
-         
-         // Optimistic update or fetch
-         try await fetchLoans()
+         do {
+             _ = try await supabase.functions.invoke("pandadoc-sign/send", options: FunctionInvokeOptions(body: payload))
+             
+             // Optimistic update or fetch
+             try await fetchLoans()
+         } catch {
+             await AlertReporter.shared.capture(error: error, category: .loans, summary: "Failed to send for signature (PandaDoc)", severity: .critical)
+             throw error
+         }
     }
     
     func signLoanAsBorrower(loan: Loan, firstName: String, lastName: String, addressLine1: String, addressLine2: String, state: String, country: String, postalCode: String, phoneNumber: String) async throws {
         guard let user = supabase.auth.currentUser, let loanId = loan.id else { throw AuthError.notAuthenticated }
         guard loan.lender_id != user.id else { throw NSError(domain: "LoanManager", code: 400, userInfo: [NSLocalizedDescriptionKey: "Lender cannot sign as borrower."]) }
 
-        let ip = await fetchPublicIP()
-        let params = ["p_loan_id": loanId.uuidString, "p_borrower_ip": ip ?? "", "p_borrower_first_name": firstName, "p_borrower_last_name": lastName, "p_borrower_address_line_1": addressLine1, "p_borrower_address_line_2": addressLine2, "p_borrower_state": state, "p_borrower_country": country, "p_borrower_postal_code": postalCode, "p_borrower_phone": phoneNumber]
-        try await supabase.rpc("borrower_sign_loan_with_identity", params: params).execute()
-        try await fetchLoans()
+        do {
+            let ip = await fetchPublicIP()
+            let params = ["p_loan_id": loanId.uuidString, "p_borrower_ip": ip ?? "", "p_borrower_first_name": firstName, "p_borrower_last_name": lastName, "p_borrower_address_line_1": addressLine1, "p_borrower_address_line_2": addressLine2, "p_borrower_state": state, "p_borrower_country": country, "p_borrower_postal_code": postalCode, "p_borrower_phone": phoneNumber]
+            try await supabase.rpc("borrower_sign_loan_with_identity", params: params).execute()
+            try await fetchLoans()
+        } catch {
+            await AlertReporter.shared.capture(error: error, category: .loans, summary: "Failed to sign as borrower", severity: .critical)
+            throw error
+        }
     }
     
     func deleteLoan(_ loan: Loan) async throws {
         guard (loan.status == .draft || loan.status == .cancelled), let id = loan.id else { return }
-        try await service.deleteLoan(id: id); try await fetchLoans()
+        
+        // Use Edge Function for atomic deletion of DB + Storage files
+        // This ensures no orphaned files remain.
+        struct DeletePayload: Encodable {
+            let loan_id: UUID
+        }
+        
+        do {
+            let payload = DeletePayload(loan_id: id)
+            _ = try await supabase.functions.invoke("delete-loan", options: FunctionInvokeOptions(body: payload))
+            
+            try await fetchLoans()
+        } catch {
+            await AlertReporter.shared.capture(error: error, category: .loans, summary: "Failed to delete loan", severity: .critical)
+            throw error
+        }
     }
     
     func transitionLoanStatus(_ loan: Loan, status: LoanStatus, reason: String? = nil) async throws {
@@ -242,6 +280,11 @@ class LoanManager {
         } else { try await service.updatePaymentStatus(paymentId: id, status: newStatus) }
         try await fetchLoans()
     }
+
+    func fetchAgreementURL(path: String) async throws -> URL {
+        let response = try await supabase.storage.from("loan-documents").createSignedURL(path: path, expiresIn: 3600)
+        return response
+    }
 }
 
 // MARK: - Realtime Delegate
@@ -258,9 +301,9 @@ extension LoanManager: RealtimeManagerDelegate {
     func handleLoanUpdate(_ loan: Loan, oldStatus: LoanStatus?) {
         if let idx = loans.firstIndex(where: { $0.id == loan.id }) { withAnimation { loans[idx] = loan } }
         else { withAnimation { insertLoanInCreatedOrder(loan) } }
-        guard let user = supabase.auth.currentUser else { return }
-        Task {
-            await notifyTransition(old: oldStatus, new: loan, userID: user.id)
+        guard let currentUser = supabase.auth.currentUser else { return }
+        Task { [currentUser] in
+            await notifyTransition(old: oldStatus, new: loan, userID: currentUser.id)
             recomputeRequiredActionCount(); await refreshPendingApprovalCount()
         }
     }
@@ -271,7 +314,7 @@ extension LoanManager: RealtimeManagerDelegate {
     }
 
     func handlePaymentInsert(payment: Payment) {
-        guard let user = supabase.auth.currentUser, let loan = loans.first(where: { $0.id == payment.loan_id }), loan.lender_id == user.id, let pid = payment.id else { return }
+        guard let currentUser = supabase.auth.currentUser, let loan = loans.first(where: { $0.id == payment.loan_id }), loan.lender_id == currentUser.id, let pid = payment.id else { return }
         Task {
             await NotificationManager.shared.postEventNotification(eventID: "p.\(pid.uuidString).pending", title: "Payment Needs Approval", body: "A repayment was submitted for review.", deepLink: loanDeepLink(loanID: payment.loan_id, paymentID: pid))
             await refreshPendingApprovalCount()
@@ -279,12 +322,14 @@ extension LoanManager: RealtimeManagerDelegate {
     }
 
     func handlePaymentUpdate(payment: Payment, oldStatus: PaymentStatus?) {
-        guard let user = supabase.auth.currentUser, let loan = loans.first(where: { $0.id == payment.loan_id }), let pid = payment.id else { return }
-        if loan.lender_id != user.id, oldStatus == .pending {
+        guard let currentUser = supabase.auth.currentUser, let loan = loans.first(where: { $0.id == payment.loan_id }), let pid = payment.id else { return }
+        if loan.lender_id != currentUser.id, oldStatus == .pending {
             if payment.status == .approved { notifyPayment(pid: pid, lid: payment.loan_id, title: "Payment Approved", body: "Approved by lender.") }
             else if payment.status == .rejected { notifyPayment(pid: pid, lid: payment.loan_id, title: "Payment Rejected", body: "Rejected. Review details.") }
         }
-        Task { await refreshPendingApprovalCount() }
+        Task { 
+            await refreshPendingApprovalCount() 
+        }
     }
     
     private func notifyPayment(pid: UUID, lid: UUID, title: String, body: String) {

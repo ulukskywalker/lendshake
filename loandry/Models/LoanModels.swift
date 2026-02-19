@@ -138,6 +138,7 @@ struct Loan: Codable, Identifiable, Hashable {
     
     // Phase 5 Closeout
     var release_document_text: String? // "Paid in Full" receipt
+    var agreement_url: String? // Path to signed PDF in Storage
     
     // Helper to initialize for creation
     init(

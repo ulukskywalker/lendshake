@@ -64,5 +64,20 @@ struct ReviewService {
         )
 
         try await supabase.from("app_feedback").insert(payload).execute()
+        
+        // Discord Alert for new feedback/review
+        Task {
+            await AlertReporter.shared.capture(
+                error: NSError(domain: "Feedback", code: 0, userInfo: [NSLocalizedDescriptionKey: "User submitted \(type.title)"]),
+                category: .feedback,
+                summary: "💬 New App Feedback",
+                severity: .warning,
+                metadata: [
+                    "Type": type.title,
+                    "Rating": rating != nil ? "\(rating!) Stars" : "No Rating",
+                    "Message": message
+                ]
+            )
+        }
     }
 }

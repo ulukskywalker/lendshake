@@ -76,6 +76,7 @@ class RealtimeManager {
                 self.realtimeSubscriptionUserID = user.id
             } catch {
                 logger.error("Loans realtime subscribe error: \(error)")
+                await AlertReporter.shared.capture(error: error, category: .loans, summary: "Loans realtime subscription failed", severity: .critical)
                 unsubscribe()
             }
         }
@@ -123,6 +124,7 @@ class RealtimeManager {
                 self.paymentsRealtimeSubscriptionUserID = user.id
             } catch {
                 logger.error("Payments realtime subscribe error: \(error)")
+                await AlertReporter.shared.capture(error: error, category: .loans, summary: "Payments realtime subscription failed", severity: .critical)
                 paymentsRealtimeChangesTask?.cancel(); paymentsRealtimeChangesTask = nil
             }
         }

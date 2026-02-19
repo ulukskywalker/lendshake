@@ -7,6 +7,7 @@
 
 import Foundation
 import OSLog
+import Supabase
 
 enum AppLogCategory: String {
     case app
@@ -88,9 +89,13 @@ final class AlertReporter {
         let scopedLogger = AppLogger(category)
         scopedLogger.error("\(summary): \(error.localizedDescription)")
 
-        guard severity == .critical else { return }
-        guard let webhookURL = AppConfig.alertWebhookURL else { return }
+        // Only alert on critical issues OR when a user sends feedback/reviews
+        let isCritical = severity == .critical
+        let isUserReview = category == .feedback
+        
+        guard isCritical || isUserReview else { return }
 
+        // Deduplication to prevent spamming Discord
         let dedupeKey = "\(category.rawValue)|\(summary)|\(error.localizedDescription)"
         if let lastSent = lastSentAtByKey[dedupeKey],
            Date().timeIntervalSince(lastSent) < minimumInterval {
@@ -98,33 +103,48 @@ final class AlertReporter {
         }
         lastSentAtByKey[dedupeKey] = Date()
 
-        var lines: [String] = []
-        lines.append("*Loandry \(severity.rawValue.capitalized) Alert*")
-        lines.append("Environment: \(AppConfig.environment)")
-        lines.append("Category: \(category.rawValue)")
-        lines.append("Summary: \(summary)")
-        lines.append("Error: \(error.localizedDescription)")
-
-        if !metadata.isEmpty {
-            let metadataLine = metadata
-                .sorted(by: { $0.key < $1.key })
-                .map { "\($0.key)=\($0.value)" }
-                .joined(separator: ", ")
-            lines.append("Metadata: \(metadataLine)")
+        // Prepare payload for edge function
+        struct AlertPayload: Encodable {
+            let title: String
+            let message: String
+            let severity: String
+            let metadata: [String: String]
         }
 
-        let payload = ["text": lines.joined(separator: "\n")]
+        let payload = AlertPayload(
+            title: "\(category.rawValue.capitalized) Error",
+            message: "\(summary)\n\nError: \(error.localizedDescription)",
+            severity: severity.rawValue,
+            metadata: metadata.merging(["category": category.rawValue, "env": AppConfig.environment]) { (_, new) in new }
+        )
 
         do {
-            var request = URLRequest(url: webhookURL)
+            try await supabase.functions.invoke("log-alert", options: FunctionInvokeOptions(body: payload))
+            logger.info("Alert forwarded to Supabase for \(category.rawValue)")
+        } catch {
+            logger.error("Failed to forward alert to Supabase: \(error.localizedDescription)")
+            
+            // Fallback to direct alert if webhook is configured (legacy support)
+            if severity == .critical, let webhookURL = AppConfig.alertWebhookURL {
+                await sendDirectWebhook(lines: [
+                    "*Loandry Fallback Alert*",
+                    "Summary: \(summary)",
+                    "Error: \(error.localizedDescription)"
+                ], url: webhookURL)
+            }
+        }
+    }
+
+    private func sendDirectWebhook(lines: [String], url: URL) async {
+        let payload = ["text": lines.joined(separator: "\n")]
+        do {
+            var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-
             _ = try await session.data(for: request)
-            logger.info("Alert sent for \(category.rawValue)")
         } catch {
-            logger.error("Failed to send alert webhook: \(error.localizedDescription)")
+            logger.error("Fallback webhook failed: \(error.localizedDescription)")
         }
     }
 }

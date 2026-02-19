@@ -89,6 +89,8 @@ struct LoanService {
             .execute()
     }
     
+
+    
     func transitionStatus(loanId: UUID, status: LoanStatus, reason: String?) async throws {
         let params: [String: String] = [
             "p_loan_id": loanId.uuidString,
