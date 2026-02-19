@@ -23,5 +23,13 @@
 	</array>
     <key>NSContactsUsageDescription</key>
     <string>Loandry needs access to your contacts to let you easily select a borrower.</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
 </dict>
 </plist>

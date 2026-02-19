@@ -339,41 +339,186 @@ extension LoanManager: RealtimeManagerDelegate {
     }
 
     func handlePaymentInsert(payment: Payment) {
-        guard let currentUser = supabase.auth.currentUser, let loan = loans.first(where: { $0.id == payment.loan_id }), loan.lender_id == currentUser.id, let pid = payment.id else { return }
+        guard let currentUser = supabase.auth.currentUser,
+              let loan = loans.first(where: { $0.id == payment.loan_id }),
+              let pid = payment.id else { return }
+        
+        let isLender = loan.lender_id == currentUser.id
+        let amount = formatCurrency(payment.amount)
+        let deepLink = loanDeepLink(loanID: payment.loan_id, paymentID: pid)
+        
         Task {
-            await NotificationManager.shared.postEventNotification(eventID: "p.\(pid.uuidString).pending", title: "Payment Needs Approval", body: "A repayment was submitted for review.", deepLink: loanDeepLink(loanID: payment.loan_id, paymentID: pid))
+            if isLender {
+                // Lender sees: borrower submitted a payment for review
+                await NotificationManager.shared.postEventNotification(
+                    eventID: "p.\(pid.uuidString).pending.lender",
+                    title: "Payment Needs Approval",
+                    body: "A \(amount) repayment was submitted for review.",
+                    deepLink: deepLink
+                )
+            } else {
+                // Borrower sees: confirmation their payment was submitted
+                await NotificationManager.shared.postEventNotification(
+                    eventID: "p.\(pid.uuidString).pending.borrower",
+                    title: "Payment Submitted",
+                    body: "Your \(amount) payment has been submitted. Waiting for lender approval.",
+                    deepLink: deepLink
+                )
+            }
             await refreshPendingApprovalCount()
         }
     }
 
     func handlePaymentUpdate(payment: Payment, oldStatus: PaymentStatus?) {
-        guard let currentUser = supabase.auth.currentUser, let loan = loans.first(where: { $0.id == payment.loan_id }), let pid = payment.id else { return }
-        if loan.lender_id != currentUser.id, oldStatus == .pending {
-            if payment.status == .approved { notifyPayment(pid: pid, lid: payment.loan_id, title: "Payment Approved", body: "Approved by lender.") }
-            else if payment.status == .rejected { notifyPayment(pid: pid, lid: payment.loan_id, title: "Payment Rejected", body: "Rejected. Review details.") }
+        guard let currentUser = supabase.auth.currentUser,
+              let loan = loans.first(where: { $0.id == payment.loan_id }),
+              let pid = payment.id,
+              oldStatus == .pending else {
+            Task { await refreshPendingApprovalCount() }
+            return
         }
-        Task { 
-            await refreshPendingApprovalCount() 
+        
+        let isLender = loan.lender_id == currentUser.id
+        let amount = formatCurrency(payment.amount)
+        let deepLink = loanDeepLink(loanID: payment.loan_id, paymentID: pid)
+        
+        Task {
+            if payment.status == .approved {
+                if isLender {
+                    await NotificationManager.shared.postEventNotification(
+                        eventID: "p.\(pid.uuidString).approved.lender",
+                        title: "Payment Approved",
+                        body: "You approved the \(amount) payment.",
+                        deepLink: deepLink
+                    )
+                } else {
+                    await NotificationManager.shared.postEventNotification(
+                        eventID: "p.\(pid.uuidString).approved.borrower",
+                        title: "Payment Approved",
+                        body: "Your \(amount) payment was approved by the lender.",
+                        deepLink: deepLink
+                    )
+                }
+            } else if payment.status == .rejected {
+                let reason = payment.rejection_reason ?? "No reason provided."
+                if isLender {
+                    await NotificationManager.shared.postEventNotification(
+                        eventID: "p.\(pid.uuidString).rejected.lender",
+                        title: "Payment Rejected",
+                        body: "You rejected the \(amount) payment.",
+                        deepLink: deepLink
+                    )
+                } else {
+                    await NotificationManager.shared.postEventNotification(
+                        eventID: "p.\(pid.uuidString).rejected.borrower",
+                        title: "Payment Rejected",
+                        body: "Your \(amount) payment was rejected. Reason: \(reason)",
+                        deepLink: deepLink
+                    )
+                }
+            }
+            await refreshPendingApprovalCount()
         }
     }
     
-    private func notifyPayment(pid: UUID, lid: UUID, title: String, body: String) {
-        Task { await NotificationManager.shared.postEventNotification(eventID: "p.\(pid.uuidString).action", title: title, body: body, deepLink: loanDeepLink(loanID: lid, paymentID: pid)) }
+    private func formatCurrency(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        return formatter.string(from: NSNumber(value: value)) ?? "$\(String(format: "%.2f", value))"
     }
 
     private func notifyTransition(old: LoanStatus?, new: Loan, userID: UUID) async {
         guard let old, old != new.status, let lid = new.id else { return }
         let isLender = new.lender_id == userID
+        let borrowerName = new.borrower_name ?? "Borrower"
+        let deepLink = loanDeepLink(loanID: lid)
+        
+        // Determine notification content based on role
         var title = ""; var body = ""
+        
         switch (old, new.status) {
-        case (.draft, .sent) where !isLender: title = "New Loan Request"; body = "Review and sign the agreement."
-        case (.sent, .approved) where isLender: title = "Borrower Signed"; body = "Borrower signed. Send funds to continue."
-        case (.approved, .funding_sent) where !isLender: title = "Funds Sent"; body = "Lender sent funds. Confirm receipt."
-        case (.funding_sent, .active) where isLender: title = "Loan Activated"; body = "Borrower confirmed receipt."
-        case (.active, .completed): title = "Loan Completed"; body = "Loan marked completed."
+        // Draft → Sent
+        case (.draft, .sent):
+            if isLender {
+                title = "Agreement Sent"
+                body = "Your loan agreement has been sent to \(borrowerName)."
+            } else {
+                title = "New Loan Request"
+                body = "You've received a loan agreement. Review and sign."
+            }
+            
+        // Sent → Approved (Borrower signed)
+        case (.sent, .approved):
+            if isLender {
+                title = "Borrower Signed"
+                body = "\(borrowerName) signed the agreement. Send funds to continue."
+            } else {
+                title = "Agreement Signed"
+                body = "You signed the agreement. Waiting for lender to send funds."
+            }
+            
+        // Approved → Funding Sent
+        case (.approved, .funding_sent):
+            if isLender {
+                title = "Funds Marked as Sent"
+                body = "You marked funds as sent. Waiting for \(borrowerName) to confirm."
+            } else {
+                title = "Funds Sent"
+                body = "Lender sent funds. Confirm receipt to activate the loan."
+            }
+            
+        // Funding Sent → Active
+        case (.funding_sent, .active):
+            if isLender {
+                title = "Loan Activated"
+                body = "\(borrowerName) confirmed receipt. Loan is now active."
+            } else {
+                title = "Loan Activated"
+                body = "You confirmed receipt. The loan is now active."
+            }
+            
+        // Active → Completed
+        case (.active, .completed):
+            if isLender {
+                title = "Loan Completed"
+                body = "The loan with \(borrowerName) has been fully repaid."
+            } else {
+                title = "Loan Completed"
+                body = "Your loan has been fully repaid. Well done!"
+            }
+            
+        // Cancelled (from any status)
+        case (_, .cancelled):
+            if isLender {
+                title = "Loan Cancelled"
+                body = "You cancelled the loan agreement."
+            } else {
+                title = "Loan Cancelled"
+                body = "The loan agreement has been cancelled by the lender."
+            }
+            
+        // Active → Forgiven
+        case (.active, .forgiven):
+            if isLender {
+                title = "Loan Forgiven"
+                body = "You forgave the remaining balance for \(borrowerName)."
+            } else {
+                title = "Loan Forgiven"
+                body = "The lender has forgiven your remaining balance!"
+            }
+            
         default: return
         }
-        await NotificationManager.shared.postEventNotification(eventID: "l.\(lid.uuidString).\(new.status.rawValue)", title: title, body: body, deepLink: loanDeepLink(loanID: lid))
+        
+        // Use a role-specific event ID so both parties get their own notification
+        let roleTag = isLender ? "lender" : "borrower"
+        await NotificationManager.shared.postEventNotification(
+            eventID: "l.\(lid.uuidString).\(new.status.rawValue).\(roleTag)",
+            title: title,
+            body: body,
+            deepLink: deepLink
+        )
     }
 
     private func upsertLoan(_ loan: Loan) {

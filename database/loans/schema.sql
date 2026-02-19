@@ -13,6 +13,7 @@ create table if not exists public.loans (
   repayment_schedule text not null, -- e.g., "Monthly", "Bi-weekly", "Lump Sum"
   late_fee_policy text not null, -- e.g., "$15 after 5 days"
   maturity_date timestamptz not null, -- When the loan must be fully paid
+  first_payment_date timestamptz, -- When the first payment is due (used for accrual anchoring)
   borrower_name text, -- Display name for borrower (until they sign up)
   borrower_email text, -- Email to invite borrower
   borrower_phone text,
@@ -24,10 +25,15 @@ create table if not exists public.loans (
   status text not null, -- State machine: draft -> sent -> approved -> funding_sent -> active -> completed
   remaining_balance numeric, -- Current outstanding balance. Null for Drafts.
   
+  -- PandaDoc Integration
+  t_pandadoc_id text, -- PandaDoc document ID for signature tracking
+  t_pandadoc_status text, -- PandaDoc document status (sent, completed, etc.)
+  
   -- Agreement Documents
   agreement_text text, -- Computed legal text of the promissory note
   agreement_rejection_reason text, -- If borrower rejects the terms
   release_document_text text, -- "Paid in Full" receipt text
+  agreement_url text, -- Path to signed PDF in Supabase Storage
   lender_signed_at timestamptz, -- Timestamp of lender signature
   borrower_signed_at timestamptz, -- Timestamp of borrower signature
   lender_ip text, -- Audit: IP address of lender signing
@@ -60,6 +66,10 @@ create policy "Delete Drafts and Cancelled" on loans for delete using ((select a
 alter table public.loans add column if not exists lender_name_snapshot text;
 alter table public.loans add column if not exists borrower_name_snapshot text;
 alter table public.loans add column if not exists agreement_rejection_reason text;
+alter table public.loans add column if not exists first_payment_date timestamptz;
+alter table public.loans add column if not exists t_pandadoc_id text;
+alter table public.loans add column if not exists t_pandadoc_status text;
+alter table public.loans add column if not exists agreement_url text;
 
 -- Data Integrity Constraints
 do $$

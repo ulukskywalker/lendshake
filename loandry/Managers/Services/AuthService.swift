@@ -44,16 +44,30 @@ struct AuthService {
         _ = try await supabase.auth.signIn(email: email, password: password)
     }
     
-    func signUp(email: String, password: String, redirectTo: URL?) async throws {
-        _ = try await supabase.auth.signUp(email: email, password: password, redirectTo: redirectTo)
+    func signUp(email: String, password: String, redirectToURL: URL?) async throws {
+        _ = try await supabase.auth.signUp(email: email, password: password, redirectTo: redirectToURL)
+    }
+    
+    func resendVerificationEmail(email: String) async throws {
+        try await supabase.auth.resend(email: email, type: .signup)
     }
     
     func signOut() async throws {
         try await supabase.auth.signOut()
     }
     
+    func signInWithProvider(_ provider: Auth.Provider) throws -> URL {
+        try supabase.auth.getOAuthSignInURL(
+            provider: provider,
+            redirectTo: URL(string: "loandry://auth/callback")!
+        )
+    }
+    
     func session(from url: URL) async throws -> Session {
         try await supabase.auth.session(from: url)
+    }
+    func deleteAccount() async throws {
+        _ = try await supabase.rpc("delete_own_account").execute()
     }
 }
 

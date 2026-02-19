@@ -10,4 +10,3 @@
 SUPABASE_URL = https:/$()/thrdeovlreaguclsdnqf.supabase.co
 SUPABASE_KEY = sb_publishable_cdAoKIFdqLOXDFlURz48xA_UU7raCTO
 APP_ENVIRONMENT = development
-ALERT_WEBHOOK_URL =

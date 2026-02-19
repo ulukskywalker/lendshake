@@ -46,6 +46,7 @@ struct LoanConstructionView: View {
     @State private var borrowerEmail: String = ""
     @State private var lateFeeSliderValue: Double = 0
     @State private var lateFeeInput: String = "0"
+    @State private var lateFeeGraceValue: Double = 5
     
     
     @State private var errorMessage: String?
@@ -89,9 +90,10 @@ struct LoanConstructionView: View {
                         interestSliderValue: $interestSliderValue,
                         lateFeePolicy: $lateFeeInput,
                         lateFeeSliderValue: $lateFeeSliderValue,
+                        gracePeriodDays: $lateFeeGraceValue,
                         onInterestTextChange: sanitizeInterestValue,
                         onInterestSliderChange: handleInterestSliderChange,
-                        onLateFeeSliderChange: handleLateFeeSliderChange
+                        onLateFeeChange: handleLateFeeChange
                     )
                     .transition(pageTransition)
                 case .lender:
@@ -121,7 +123,7 @@ struct LoanConstructionView: View {
                         repaymentSchedule: repaymentSchedule,
                         maturityDate: maturityDate,
                         firstPaymentDate: firstPaymentDate,
-                        lateFeePolicy: String(format: "%.0f", lateFeeSliderValue),
+                        lateFeePolicy: formatLateFeePolicy(),
                         lenderName: "\(lenderFirstName) \(lenderLastName)".trimmingCharacters(in: .whitespaces),
                         borrowerName: borrowerName,
                         borrowerEmail: borrowerEmail
@@ -136,7 +138,8 @@ struct LoanConstructionView: View {
         .navigationTitle(currentStep.title)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
-        .interactiveDismissDisabled(true)
+        .interactiveDismissDisabled(false)
+        .presentationDragIndicator(.visible) // Native indicator that sheet is dismissible
         .onAppear {
             prefillLenderFromProfileIfNeeded()
         }
@@ -148,20 +151,27 @@ struct LoanConstructionView: View {
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
+                if currentStep == .amount {
+                    Button("Cancel") { dismiss() }
+                } else {
+                    Button {
+                        handleBack()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .fontWeight(.semibold)
+                                .imageScale(.medium)
+                            Text("Back")
+                        }
+                    }
+                }
             }
             
-            ToolbarItem(placement: .bottomBar) {
-                HStack {
-                    if currentStep != .amount {
-                        Button("Back") { handleBack() }
-                    }
-                    Spacer()
-                    Button(currentStep == .review ? (createdLoan != nil ? "Done" : "Send") : "Next") {
-                        handleNext()
-                    }
-                    .bold()
+            ToolbarItem(placement: .confirmationAction) {
+                Button(currentStep == .review ? (createdLoan != nil ? "Done" : "Send") : "Next") {
+                    handleNext()
                 }
+                .bold()
                 .disabled(loanManager.isLoading)
             }
         }
@@ -293,7 +303,7 @@ struct LoanConstructionView: View {
                 principal: principal,
                 interest: interest,
                 schedule: repaymentSchedule.rawValue,
-                lateFee: String(format: "%.0f", lateFeeSliderValue),
+                lateFee: formatLateFeePolicy(),
                 maturity: maturityDate,
                 firstPaymentDate: firstPaymentDate,
                 borrowerName: borrowerName,
@@ -473,9 +483,21 @@ struct LoanConstructionView: View {
         interestRateInput = String(format: "%.1f", newValue)
     }
     
-    private func handleLateFeeSliderChange(_ newValue: Double) {
-        lateFeeInput = String(format: "%.0f", newValue)
+    private func handleLateFeeChange(amount: Double, graceDays: Double) {
+        // Just used to trigger updates, values are bound directly via @Binding
+        lateFeeSliderValue = amount
+        lateFeeGraceValue = graceDays
+        lateFeeInput = String(format: "%.0f", amount)
     }
+
+    private func formatLateFeePolicy() -> String {
+        if lateFeeSliderValue <= 0 { return "No Late Fee" }
+        let days = Int(lateFeeGraceValue)
+        return "$\(Int(lateFeeSliderValue)) after \(days) \(days == 1 ? "day" : "days")"
+    }
+    
+    // Legacy handler removed, but keeping method sig if needed by other components
+    // private func handleLateFeeSliderChange(_ newValue: Double) { ... }
     
     private func handleRepaymentScheduleChange() {
         withAnimation {

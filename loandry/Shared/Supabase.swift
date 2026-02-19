@@ -39,4 +39,9 @@ enum APIConfig {
 let supabase = SupabaseClient(
     supabaseURL: APIConfig.supabaseURL,
     supabaseKey: APIConfig.supabaseKey,
+    options: .init(
+        auth: .init(
+            redirectToURL: URL(string: "loandry://auth/callback")
+        )
+    )
 )

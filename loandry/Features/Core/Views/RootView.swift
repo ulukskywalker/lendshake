@@ -11,7 +11,7 @@ struct RootView: View {
     @Environment(AuthManager.self) var authManager
     @Environment(NotificationManager.self) var notificationManager
     @Environment(AppRouter.self) var appRouter
-    @AppStorage("notifications.prompted.on.launch") private var didPromptForNotifications = false
+
     
     var body: some View {
         Group {
@@ -25,11 +25,7 @@ struct RootView: View {
                 WelcomeView()
             }
         }
-        .task {
-            guard !didPromptForNotifications else { return }
-            _ = await notificationManager.requestAuthorizationIfNeeded()
-            didPromptForNotifications = true
-        }
+
         .onOpenURL { url in
             Task {
                 if await authManager.handleAuthCallback(url: url) {

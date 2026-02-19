@@ -183,14 +183,7 @@ struct AccountView: View {
         .onAppear {
             loadProfile()
         }
-        .safeAreaInset(edge: .bottom) {
-            if !isEditing {
-                Text("Tap Edit to update your profile details.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
-            }
-        }
+
         .lsToast(message: $successToast, style: .success)
         .lsToast(message: $errorToast, style: .error)
         .sensoryFeedback(.success, trigger: successToast) { _, newValue in newValue != nil }

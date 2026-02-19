@@ -125,8 +125,13 @@ class AuthManager {
     
     func signUp(email: String, password: String) async throws {
         let redirectURL = URL(string: "loandry://auth/callback")
-        try await service.signUp(email: email, password: password, redirectTo: redirectURL)
+        try await service.signUp(email: email, password: password, redirectToURL: redirectURL)
         awaitingEmailConfirmation = true
+    }
+    
+    func signInWithProvider(_ provider: Auth.Provider) async throws {
+        let url = try service.signInWithProvider(provider)
+        await UIApplication.shared.open(url)
     }
 
     func handleAuthCallback(url: URL) async -> Bool {
@@ -141,9 +146,21 @@ class AuthManager {
             return false
         }
     }
+    
+    func resendVerification() async throws {
+        guard let email = currentUserEmail else { return }
+        try await service.resendVerificationEmail(email: email)
+    }
 
     func completeVerificationIfPossible() async -> Bool {
         await checkSession()
         return isAuthenticated
+    }
+    
+    func deleteAccount() async throws {
+        // Attempt to delete account via RPC (checks for active loans first)
+        try await service.deleteAccount()
+        // If successful, sign out locally
+        try await signOut()
     }
 }

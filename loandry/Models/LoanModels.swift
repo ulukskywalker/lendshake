@@ -267,14 +267,20 @@ struct Loan: Codable, Identifiable, Hashable {
     }
     
     var gracePeriodDays: Int {
-        // Parse "after 5 days"
-        // Look for digit before "day"
-        // Default to 5 if not found but policy exists
-        if late_fee_policy.isEmpty || late_fee_policy.lowercased() == "none" { return 0 }
+        let policy = late_fee_policy.trimmingCharacters(in: .whitespacesAndNewlines)
+        if policy.isEmpty || policy.lowercased() == "none" { return 0 }
         
-        // Simple heuristic: extract first number not attached to $?
-        // Or strictly look for "X days"
-        // Let's default to 5 for MVP if parsing fails but amount exists
+        // Try to parse "X days" pattern (e.g., "after 7 days", "$15 after 10 days")
+        if let range = policy.range(of: "([0-9]+)\\s*day", options: .regularExpression) {
+            let match = String(policy[range])
+            if let numRange = match.range(of: "[0-9]+", options: .regularExpression) {
+                if let days = Int(match[numRange]) {
+                    return max(1, days)
+                }
+            }
+        }
+        
+        // Default to 5 if a late fee amount exists but no grace period was specified
         return 5
     }
 }

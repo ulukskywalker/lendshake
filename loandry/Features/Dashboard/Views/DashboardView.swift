@@ -10,11 +10,13 @@ import SwiftUI
 struct DashboardView: View {
     @State private var viewModel = DashboardViewModel()
     @Environment(AppRouter.self) var appRouter
+    @Environment(NotificationManager.self) var notificationManager
+    @AppStorage("notifications.prompted") private var didPromptForNotifications = false
     
     var body: some View {
         NavigationStack(path: $viewModel.navigationPath) {
             LoanListView()
-                .navigationTitle("Loandry")
+                .navigationTitle("Loans")
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
@@ -25,6 +27,10 @@ struct DashboardView: View {
                     }
                 }
                 .task {
+                    if !didPromptForNotifications {
+                        _ = await notificationManager.requestAuthorizationIfNeeded()
+                        didPromptForNotifications = true
+                    }
                     await viewModel.onAppear()
                 }
                 .refreshable {
@@ -52,7 +58,7 @@ struct DashboardView: View {
                          _ = appRouter.consumeRoute()
                     }
                 }
-                .fullScreenCover(isPresented: $viewModel.showCreateSheet) {
+                .sheet(isPresented: $viewModel.showCreateSheet) {
                     NavigationStack {
                         LoanConstructionView(onLoanCreated: { newLoan in
                             viewModel.onLoanCreated(newLoan: newLoan)

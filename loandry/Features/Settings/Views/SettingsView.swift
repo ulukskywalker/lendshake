@@ -22,6 +22,8 @@ struct SettingsView: View {
     @State private var feedbackSuccess: String?
     @State private var isFeedbackSubmitting = false
     @State private var isFeedbackSheetPresented = false
+    @State private var showDeleteConfirmation = false
+    @State private var deleteConfirmationText = ""
 
     var body: some View {
         NavigationStack {
@@ -36,9 +38,6 @@ struct SettingsView: View {
                 
                 Section("Notifications") {
                     Toggle("Action Notifications", isOn: $actionNotificationsEnabled)
-
-                    LabeledContent("System Notifications", value: notificationStatusText)
-                        .foregroundStyle(notificationManager.notificationsEnabledInSystem ? Color.secondary : Color.orange)
                 }
                 
                 if let notificationError {
@@ -66,6 +65,10 @@ struct SettingsView: View {
                 Section {
                     Button("Log Out", role: .destructive) {
                         Task { await signOut() }
+                    }
+                    
+                    Button("Delete Account", role: .destructive) {
+                        showDeleteConfirmation = true
                     }
                 }
 
@@ -156,18 +159,24 @@ struct SettingsView: View {
         .sensoryFeedback(.success, trigger: feedbackSuccess) { _, newValue in newValue != nil }
         .sensoryFeedback(.error, trigger: feedbackError) { _, newValue in newValue != nil }
         .sensoryFeedback(.error, trigger: signOutError) { _, newValue in newValue != nil }
-    }
-    
-    private var notificationStatusText: String {
-        switch notificationManager.authorizationStatus {
-        case .authorized: return "Allowed"
-        case .provisional: return "Provisional"
-        case .denied: return "Denied"
-        case .notDetermined: return "Not Requested"
-        case .ephemeral: return "Ephemeral"
-        @unknown default: return "Unknown"
+        .alert("Delete Account", isPresented: $showDeleteConfirmation) {
+            TextField("Type 'Delete Account'", text: $deleteConfirmationText)
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                if deleteConfirmationText == "Delete Account" {
+                    performDeleteAccount()
+                }
+            }
+            .disabled(deleteConfirmationText != "Delete Account")
+        } message: {
+            Text("This action cannot be undone. Type 'Delete Account' to confirm.")
+        }
+        .onChange(of: showDeleteConfirmation) { _, isPresented in
+            if isPresented { deleteConfirmationText = "" }
         }
     }
+    
+
     
     private func applyNotificationToggle(enabled: Bool) async {
         notificationError = nil
@@ -212,6 +221,17 @@ struct SettingsView: View {
             isFeedbackSheetPresented = false
         } catch {
             feedbackError = "Could not submit feedback: \(error.localizedDescription)"
+        }
+    }
+    
+    private func performDeleteAccount() {
+        signOutError = nil
+        Task {
+            do {
+                try await authManager.deleteAccount()
+            } catch {
+                signOutError = "Deletion Failed: \(error.localizedDescription)"
+            }
         }
     }
     

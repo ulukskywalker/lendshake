@@ -206,12 +206,32 @@ serve(async (req: Request) => {
                                 console.error("Failed to process document download:", downloadError);
                             }
 
-                            // Mark loan as approved/active
-                            await supabase.rpc('transition_loan_status', {
-                                p_loan_id: loanId,
-                                p_new_status: 'approved', // Or 'active' if funding is not tracked separately
-                                p_reason: 'Signed via PandaDoc'
-                            });
+                            // Mark loan as approved (borrower signed via PandaDoc)
+                            // Note: We use direct update via service role because webhook
+                            // has no auth.uid() context for the RPC.
+                            const { error: statusError } = await supabase
+                                .from("loans")
+                                .update({
+                                    status: "approved",
+                                    borrower_signed_at: new Date().toISOString()
+                                })
+                                .eq("id", loanId)
+                                .eq("status", "sent"); // Guard: only transition from 'sent'
+
+                            if (statusError) {
+                                console.error("Status transition error:", statusError);
+                            } else {
+                                // Log the event for audit trail
+                                await supabase.from("loan_events").insert({
+                                    loan_id: loanId,
+                                    event_type: "borrower_signed",
+                                    metadata: {
+                                        from_status: "sent",
+                                        to_status: "approved",
+                                        source: "pandadoc_webhook"
+                                    }
+                                });
+                            }
                         }
                     }
                 }

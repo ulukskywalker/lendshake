@@ -5,12 +5,13 @@ struct LoanConstructionCostsStepView: View {
     @Binding var interestSliderValue: Double
     @Binding var lateFeePolicy: String
     @Binding var lateFeeSliderValue: Double
+    @Binding var gracePeriodDays: Double
     
     @State private var hasLateFee: Bool = false
     
     let onInterestTextChange: (String) -> Void
     let onInterestSliderChange: (Double) -> Void
-    let onLateFeeSliderChange: (Double) -> Void
+    let onLateFeeChange: (Double, Double) -> Void // (Amount, GraceDays)
     
     private var usuryResult: LoanValidationResult {
         LoanValidation.validateUsury(rate: interestSliderValue)
@@ -75,31 +76,55 @@ struct LoanConstructionCostsStepView: View {
                         if !enabled {
                             lateFeePolicy = "0"
                             lateFeeSliderValue = 0
+                            onLateFeeChange(0, gracePeriodDays)
+                        } else if lateFeeSliderValue == 0 {
+                            lateFeeSliderValue = 15 // Default start value
+                            onLateFeeChange(15, gracePeriodDays)
                         }
                     }
                 
                 if hasLateFee {
-                    VStack(alignment: .leading) {
-                        HStack {
-                            Text("Fee Amount")
-                            Spacer()
-                            Text(lateFeeSliderValue.formatted(.currency(code: "USD")))
-                                .bold()
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Fee Amount Slider
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text("Fee Amount")
+                                Spacer()
+                                Text(lateFeeSliderValue.formatted(.currency(code: "USD")))
+                                    .bold()
+                            }
+                            Slider(value: $lateFeeSliderValue, in: 5...50, step: 5)
+                                .tint(.red)
                         }
                         
-                        Slider(value: $lateFeeSliderValue, in: 0...50, step: 5)
-                            .tint(.red)
-                            .onChange(of: lateFeeSliderValue) { _, newValue in
-                                onLateFeeSliderChange(newValue)
-                            }
+                        Divider()
+                        
+                        // Grace Period Slider
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                 Text("Grace Period")
+                                 Spacer()
+                                 Text(gracePeriodText)
+                                     .bold()
+                                     .foregroundStyle(.secondary)
+                             }
+                            Slider(value: $gracePeriodDays, in: 0...30, step: 1)
+                                .tint(.orange)
+                        }
                     }
                     .padding(.vertical, 4)
+                    .onChange(of: lateFeeSliderValue) { _, _ in
+                        onLateFeeChange(lateFeeSliderValue, gracePeriodDays)
+                    }
+                    .onChange(of: gracePeriodDays) { _, _ in
+                        onLateFeeChange(lateFeeSliderValue, gracePeriodDays)
+                    }
                 }
             } header: {
                 Text("Late Fees")
             } footer: {
                 if hasLateFee {
-                    Text("Applies after a 5-day grace period.")
+                    Text(lateFeeFooterText)
                 }
             }
         }
@@ -108,5 +133,18 @@ struct LoanConstructionCostsStepView: View {
                 hasLateFee = true
             }
         }
+    }
+    
+    private var gracePeriodText: String {
+        let days = Int(gracePeriodDays)
+        return "\(days) \(days == 1 ? "day" : "days")"
+    }
+    
+    private var lateFeeFooterText: String {
+        let days = Int(gracePeriodDays)
+        // Ensure singular/plural is correct in footer too if needed, but "days late" is usually fine even for 1 "day". 
+        // "more than 1 days late" -> "more than 1 day late"
+        let suffix = days == 1 ? "day" : "days"
+        return "Borrower will be charged \(lateFeeSliderValue.formatted(.currency(code: "USD"))) if payment is more than \(days) \(suffix) late."
     }
 }

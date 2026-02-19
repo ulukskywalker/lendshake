@@ -63,7 +63,7 @@ struct LoanListView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .listRowBackground(Color.clear)
             } else if loanManager.loans.isEmpty {
-                ContentUnavailableView("No Shakes Yet", systemImage: "doc.text.magnifyingglass")
+                ContentUnavailableView("No Loans", systemImage: "doc.text.magnifyingglass")
                     .listRowBackground(Color.clear)
             } else {
                 if !attentionLoans.isEmpty {

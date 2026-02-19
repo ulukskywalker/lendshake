@@ -56,6 +56,20 @@ struct VerificationWaitingView: View {
             }
             .disabled(viewModel.isChecking)
             
+            Button {
+                Task { await viewModel.resendVerification() }
+            } label: {
+                if viewModel.isResending {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Resend Email")
+                        .font(.subheadline)
+                        .foregroundStyle(.blue)
+                }
+            }
+            .disabled(viewModel.isResending || viewModel.isChecking)
+            .padding(.top, 10)
+            
             Button("Cancel / Back to Sign In") {
                 viewModel.cancel()
             }

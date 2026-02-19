@@ -12,6 +12,7 @@ import Observation
 @Observable
 class VerificationWaitingViewModel {
     var isChecking = false
+    var isResending = false
     var statusMessage: String?
     
     private let authManager: AuthManager
@@ -35,10 +36,31 @@ class VerificationWaitingViewModel {
         if !completed {
             statusMessage = "Open the verification link from the same device to finish sign in."
         } else {
-            triggerSuccessHaptic.toggle()
+            triggerSuccessHaptic.toggle() // The observable property
         }
         
         isChecking = false
+    }
+
+    func resendVerification() async {
+        guard !isResending else { return }
+        
+        if authManager.currentUserEmail == nil {
+            statusMessage = "Session expired. Please sign in again."
+            return
+        }
+
+        isResending = true
+        statusMessage = "Sending..."
+        
+        do {
+            try await authManager.resendVerification()
+            statusMessage = "Sent! Check your inbox."
+        } catch {
+            statusMessage = "Error: \(error.localizedDescription)"
+        }
+        
+        isResending = false
     }
     
     func cancel() {

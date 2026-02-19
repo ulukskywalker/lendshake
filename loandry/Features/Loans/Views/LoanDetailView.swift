@@ -26,6 +26,7 @@ struct LoanDetailView: View {
     @State private var showRejectAlert: Bool = false
     @State private var showAgreementRejectionReasonSheet: Bool = false
     @State private var agreementRejectionReason: String = ""
+    @State private var forgiveConfirmationText: String = ""
     
     @State private var showAgreementSheet: Bool = false
     @State private var showBorrowerSignSheet: Bool = false
@@ -96,9 +97,18 @@ struct LoanDetailView: View {
         .sheet(isPresented: $showAgreementRejectionReasonSheet) { rejectionReasonSheet }
         .alert("Error", isPresented: $showError) { Button("OK", role: .cancel) { } } message: { Text(errorMsg ?? "Unknown error") }
         .alert("Forgive Loan?", isPresented: $showForgiveAlert) {
+            TextField("Type 'Forgive Loan'", text: $forgiveConfirmationText)
             Button("Cancel", role: .cancel) { }
-            Button("Forgive", role: .destructive) { performTransition(to: .forgiven) }
-        } message: { Text("This action cannot be undone.") }
+            Button("Forgive", role: .destructive) {
+                if forgiveConfirmationText == "Forgive Loan" {
+                   performTransition(to: .forgiven)
+                }
+            }
+            .disabled(forgiveConfirmationText != "Forgive Loan")
+        } message: { Text("This action cannot be undone. Type 'Forgive Loan' to confirm.") }
+        .onChange(of: showForgiveAlert) { _, isPresented in
+            if isPresented { forgiveConfirmationText = "" }
+        }
         .alert("Delete Draft?", isPresented: $showDeleteDraftAlert) {
             Button("Delete", role: .destructive) { performDelete() }
         } message: { Text("Permanently delete this draft?") }
