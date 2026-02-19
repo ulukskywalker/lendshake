@@ -64,6 +64,7 @@ struct CircularAmountDialView: View {
         .contentShape(Circle().inset(by: -handleRadius))
         .gesture(dragGesture)
         .frame(width: dialRadius * 2 + handleRadius * 2, height: dialRadius * 2 + handleRadius * 2)
+        .sensoryFeedback(.selection, trigger: value)
     }
 
     private var dragGesture: some Gesture {
@@ -93,7 +94,7 @@ struct CircularAmountDialView: View {
         let clamped = min(max(rounded, 0), maxValue)
         
         if abs(self.value - clamped) >= 25 {
-            HapticUtility.selection()
+            // Haptic is handled by .sensoryFeedback on the view now
         }
         
         self.value = clamped

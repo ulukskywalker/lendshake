@@ -124,6 +124,8 @@ struct Loan: Codable, Identifiable, Hashable {
     var borrower_name_snapshot: String?
     var status: LoanStatus
     var remaining_balance: Double?
+    var t_pandadoc_id: String?
+    var t_pandadoc_status: String?
     let created_at: Date?
     
     // Agreement Fields

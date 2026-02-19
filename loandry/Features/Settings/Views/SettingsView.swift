@@ -151,7 +151,11 @@ struct SettingsView: View {
                     }
                 }
             }
+
         }
+        .sensoryFeedback(.success, trigger: feedbackSuccess) { _, newValue in newValue != nil }
+        .sensoryFeedback(.error, trigger: feedbackError) { _, newValue in newValue != nil }
+        .sensoryFeedback(.error, trigger: signOutError) { _, newValue in newValue != nil }
     }
     
     private var notificationStatusText: String {
@@ -205,11 +209,9 @@ struct SettingsView: View {
         do {
             try await ReviewService.shared.submitFeedback(type: feedbackType, rating: feedbackRating, message: message)
             feedbackSuccess = "Thanks. Your feedback was submitted."
-            HapticUtility.notification(.success)
             isFeedbackSheetPresented = false
         } catch {
             feedbackError = "Could not submit feedback: \(error.localizedDescription)"
-            HapticUtility.notification(.error)
         }
     }
     
@@ -218,7 +220,6 @@ struct SettingsView: View {
             try await authManager.signOut()
         } catch {
             signOutError = "Log out failed: \(error.localizedDescription)"
-            HapticUtility.notification(.error)
         }
     }
 }

@@ -8,9 +8,7 @@
 import SwiftUI
 
 struct VerificationWaitingView: View {
-    @Environment(AuthManager.self) private var authManager
-    @State private var isChecking = false
-    @State private var statusMessage: String?
+    @State private var viewModel = VerificationWaitingViewModel()
     
     var body: some View {
         VStack(spacing: 20) {
@@ -28,8 +26,8 @@ struct VerificationWaitingView: View {
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
                 .padding(.horizontal)
-
-            if let statusMessage = statusMessage {
+            
+            if let statusMessage = viewModel.statusMessage {
                 Text(statusMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -41,10 +39,10 @@ struct VerificationWaitingView: View {
             
             Button {
                 Task {
-                    await checkVerification()
+                    await viewModel.checkVerification()
                 }
             } label: {
-                if isChecking {
+                if viewModel.isChecking {
                     ProgressView()
                 } else {
                     Text("I've Verified")
@@ -56,37 +54,21 @@ struct VerificationWaitingView: View {
                         .cornerRadius(10)
                 }
             }
-            .disabled(isChecking)
+            .disabled(viewModel.isChecking)
             
             Button("Cancel / Back to Sign In") {
-                authManager.awaitingEmailConfirmation = false
-                authManager.isAuthenticated = false
+                viewModel.cancel()
             }
             .padding(.top, 10)
             
             Spacer().frame(height: 20)
         }
         .padding()
-    }
-    
-    private func checkVerification() async {
-        isChecking = true
-        statusMessage = nil
-        
-        let completed = await authManager.completeVerificationIfPossible()
-        
-        if !completed {
-            statusMessage = "Open the verification link from the same device to finish sign in."
-            HapticUtility.notification(.warning)
-        } else {
-            HapticUtility.notification(.success)
-        }
-        
-        isChecking = false
+        .sensoryFeedback(.warning, trigger: viewModel.statusMessage) { _, newValue in newValue != nil }
+        .sensoryFeedback(.success, trigger: viewModel.triggerSuccessHaptic)
     }
 }
 
 #Preview {
     VerificationWaitingView()
-        .environment(AuthManager())
 }

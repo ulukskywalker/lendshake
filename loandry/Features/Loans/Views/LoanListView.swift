@@ -24,10 +24,6 @@ struct LoanListView: View {
         visibleLoans.filter { loanManager.requiredActionLabel(for: $0) != nil }
     }
     
-    var attentionLoanIDs: Set<UUID> {
-        Set(attentionLoans.compactMap(\.id))
-    }
-
     var lendingLoans: [Loan] {
         visibleLoans.filter {
             !isAttentionLoan($0) &&
@@ -57,118 +53,71 @@ struct LoanListView: View {
     
     func isAttentionLoan(_ loan: Loan) -> Bool {
         guard let loanId = loan.id else { return false }
-        return attentionLoanIDs.contains(loanId)
+        return attentionLoans.contains(where: { $0.id == loanId })
     }
     
     var body: some View {
         List {
             if loanManager.isLoading && loanManager.loans.isEmpty {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Loading loans...")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .padding(.top, 40)
+                ProgressView("Loading loans...")
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .listRowBackground(Color.clear)
             } else if loanManager.loans.isEmpty {
                 ContentUnavailableView("No Shakes Yet", systemImage: "doc.text.magnifyingglass")
                     .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .padding(.top, 40)
             } else {
                 if !attentionLoans.isEmpty {
                     Section {
                         ForEach(attentionLoans) { loan in
-                            loanRow(for: loan)
+                            LoanRow(loan: loan)
                         }
                     } header: {
-                        HStack {
-                            Image(systemName: "exclamationmark.circle.fill")
-                            Text("Needs Attention")
-                        }
-                        .foregroundStyle(.red)
-                        .font(.headline)
-                        .textCase(nil)
-                        .padding(.vertical, 8)
+                        Text("Needs Attention")
                     }
                 }
                 
-                // 1. LENDING SECTION (Green)
                 if !lendingLoans.isEmpty {
                     Section {
                         ForEach(lendingLoans) { loan in
-                            loanRow(for: loan)
+                            LoanRow(loan: loan)
                         }
                     } header: {
-                        HStack {
-                            Image(systemName: "arrow.up.right")
-                            Text("Owes You (Assets)")
-                        }
-                        .foregroundStyle(Color.blue)
-                        .font(.headline)
-                        .textCase(nil)
-                        .padding(.vertical, 8)
+                        Text("Assets")
                     }
                 }
                 
-                // 2. BORROWING SECTION (Orange)
                 if !borrowingLoans.isEmpty {
                     Section {
                         ForEach(borrowingLoans) { loan in
-                            loanRow(for: loan)
+                            LoanRow(loan: loan)
                         }
                     } header: {
-                        HStack {
-                            Image(systemName: "arrow.down.left")
-                            Text("You Owe (Liabilities)")
-                        }
-                        .foregroundStyle(Color.orange)
-                        .font(.headline)
-                        .textCase(nil)
-                        .padding(.vertical, 8)
+                        Text("Liabilities")
                     }
                 }
                 
-                // 3. DRAFTS SECTION
                 if !draftLoans.isEmpty {
                     Section {
                         ForEach(draftLoans) { loan in
-                            loanRow(for: loan)
+                            LoanRow(loan: loan)
                         }
                     } header: {
                         Text("Drafts")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .textCase(nil)
-                            .padding(.vertical, 8)
                     }
                 }
                 
-                // 4. HISTORY SECTION
                 if !historyLoans.isEmpty {
                     Section {
-                        DisclosureGroup("Show History (\(historyLoans.count))") {
-                            ForEach(historyLoans) { loan in
-                                loanRow(for: loan)
-                            }
+                        ForEach(historyLoans) { loan in
+                            LoanRow(loan: loan)
                         }
-                        .tint(.secondary)
                     } header: {
-                        Text("Completed")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                            .textCase(nil)
-                            .padding(.vertical, 8)
+                        Text("History")
                     }
                 }
             }
         }
         .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(Color.appBackground)
         .alert("Delete Draft Loan?", isPresented: $showDeleteAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
@@ -198,16 +147,10 @@ struct LoanListView: View {
     }
     
     @ViewBuilder
-    func loanRow(for loan: Loan) -> some View {
-        ZStack {
-            NavigationLink(destination: LoanDetailView(loan: loan)) {
-                EmptyView()
-            }
-            .opacity(0)
-            
+    func LoanRow(loan: Loan) -> some View {
+        NavigationLink(value: loan) {
             LoanCardView(loan: loan, isLender: loanManager.isLender(of: loan))
         }
-        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if loan.status == .draft {
                 Button(role: .destructive) {
@@ -270,32 +213,19 @@ struct LoanCardView: View {
             // 2. Center Info
             VStack(alignment: .leading, spacing: 2) {
                 Text(counterpartyName)
-                    .font(.body) // Standard list body font
+                    .font(.body)
                     .fontWeight(.medium)
                     .foregroundStyle(Color.primary)
                     .lineLimit(1)
                 
-                HStack(spacing: 6) {
+                if let attentionLabel = loanManager.requiredActionLabel(for: loan) {
+                    Text(attentionLabel)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else {
                     Text(loan.status.title)
                         .font(.caption)
-                        .fontWeight(.semibold)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill((loan.status == .active ? themeColor : Color.secondary).opacity(0.12))
-                        )
-                        .foregroundStyle(loan.status == .active ? themeColor : .secondary)
-                    
-                    if loan.status == .draft {
-                        Text("• " + (loan.created_at?.formatted(date: .abbreviated, time: .omitted) ?? ""))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                if let attentionLabel = loanManager.requiredActionLabel(for: loan) {
-                    LoanAttentionBadgeView(text: attentionLabel)
+                        .foregroundStyle(.secondary)
                 }
             }
             
@@ -303,28 +233,22 @@ struct LoanCardView: View {
             
             // 3. Trailing Amount (Wallet Style)
             VStack(alignment: .trailing, spacing: 2) {
-                // Prefix: + for Lender, - for Borrower
                 let amountText = loan.principal_amount.formatted(.currency(code: "USD"))
                 let prefix = isLender ? "+" : "-"
                 
                 Text("\(prefix)\(amountText)")
-                    .font(.callout) // Standard numeric font size
-                    .fontWeight(.medium) // Not too bold, just standard
+                    .font(.callout)
+                    .fontWeight(.medium)
                     .foregroundStyle(loan.status == .completed || loan.status == .forgiven ? .gray : themeColor)
                 
-                if loan.status == .active {
-                     Text("Balance")
+                if loan.status == .draft {
+                     Text(loan.created_at?.formatted(date: .abbreviated, time: .omitted) ?? "")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
-            
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 4) // Reduced padding for standard list feel
-        .contentShape(Rectangle())
+        .padding(.vertical, 4)
         .task(id: loan.lender_id) {
             if !isLender {
                 if let name = await authManager.fetchProfileName(for: loan.lender_id) {
@@ -335,22 +259,9 @@ struct LoanCardView: View {
     }
 }
 
-private struct LoanAttentionBadgeView: View {
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(.red)
-                .frame(width: 7, height: 7)
-            Text(text)
-                .font(.caption)
-                .foregroundStyle(.red)
-        }
-    }
-}
-
 #Preview {
     LoanListView()
-        .environment(LoanManager())
+        .environment(LoanManager.shared)
+        .environment(AuthManager.shared)
+        .environment(AppRouter())
 }

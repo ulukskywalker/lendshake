@@ -12,6 +12,8 @@ import Supabase
 @MainActor
 @Observable
 class LoanManager {
+    static let shared = LoanManager()
+    
     private let logger = AppLogger(.loans)
     private let service = LoanService.shared
 
@@ -121,6 +123,7 @@ class LoanManager {
     }
     
     func signLoan(loan: Loan) async throws {
+        // Legacy internal signing logic kept if needed, but for PandaDoc flow:
         guard let user = supabase.auth.currentUser, let loanId = loan.id else { throw AuthError.notAuthenticated }
         let ip = await fetchPublicIP(); let isLender = (loan.lender_id == user.id)
         if isLender {
@@ -130,6 +133,53 @@ class LoanManager {
             try await supabase.rpc("borrower_sign_loan", params: ["p_loan_id": loanId.uuidString, "p_borrower_ip": ip ?? ""]).execute()
         }
         try await fetchLoans()
+    }
+    
+    func sendForSignature(loan: Loan) async throws {
+         guard let loanId = loan.id else { return }
+         
+         struct SendPayload: Encodable {
+             let loan_id: UUID
+             let borrower_email: String
+             let borrower_name: String
+             let lender_name: String
+             let loan_amount: String
+             let interest_rate: String
+             let repayment_schedule: String
+             let borrower_state: String?
+             let lender_state: String?
+         }
+         
+         // Try to resolve borrower state
+         var borrowerState: String? = nil
+         if let borrowerID = loan.borrower_id {
+             let profile = try? await supabase.from("profiles").select().eq("id", value: borrowerID).single().execute().value as Profile
+             borrowerState = profile?.residence_state
+         }
+         
+         // Resolve lender state (current user)
+         var lenderState: String? = nil
+         if let lenderID = supabase.auth.currentUser?.id {
+             let profile = try? await supabase.from("profiles").select().eq("id", value: lenderID).single().execute().value as Profile
+             lenderState = profile?.residence_state
+         }
+         
+         let payload = SendPayload(
+             loan_id: loanId,
+             borrower_email: loan.borrower_email ?? "",
+             borrower_name: loan.borrower_name ?? "Borrower",
+             lender_name: loan.lender_name_snapshot ?? "Lender",
+             loan_amount: String(format: "%.2f", loan.principal_amount),
+             interest_rate: String(format: "%.2f", loan.interest_rate),
+             repayment_schedule: loan.repayment_schedule,
+             borrower_state: borrowerState,
+             lender_state: lenderState
+         )
+         
+         _ = try await supabase.functions.invoke("pandadoc-sign/send", options: FunctionInvokeOptions(body: payload))
+         
+         // Optimistic update or fetch
+         try await fetchLoans()
     }
     
     func signLoanAsBorrower(loan: Loan, firstName: String, lastName: String, addressLine1: String, addressLine2: String, state: String, country: String, postalCode: String, phoneNumber: String) async throws {
@@ -143,7 +193,7 @@ class LoanManager {
     }
     
     func deleteLoan(_ loan: Loan) async throws {
-        guard loan.status == .draft, let id = loan.id else { return }
+        guard (loan.status == .draft || loan.status == .cancelled), let id = loan.id else { return }
         try await service.deleteLoan(id: id); try await fetchLoans()
     }
     

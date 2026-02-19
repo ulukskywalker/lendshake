@@ -8,9 +8,10 @@
 import SwiftUI
 
 @main
+@MainActor
 struct loandryApp: App {
-    @State private var authManager = AuthManager()
-    @State private var loanManager = LoanManager()
+    @State private var authManager = AuthManager.shared
+    @State private var loanManager = LoanManager.shared
     @State private var notificationManager = NotificationManager.shared
     @State private var appRouter = AppRouter.shared
     

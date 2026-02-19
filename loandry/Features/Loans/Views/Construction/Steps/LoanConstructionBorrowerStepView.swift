@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct LoanConstructionBorrowerStepView: View {
+    @Binding var borrowerName: String
     @Binding var borrowerEmail: String
 
     var body: some View {
@@ -12,6 +13,10 @@ struct LoanConstructionBorrowerStepView: View {
 
             Form {
                 Section {
+                    TextField("Legal Name", text: $borrowerName)
+                        .textContentType(.name)
+                        .textInputAutocapitalization(.words)
+                    
                     TextField("Email (Required)", text: $borrowerEmail)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)

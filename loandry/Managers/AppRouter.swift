@@ -12,7 +12,7 @@ final class AppRouter {
 
     private(set) var pendingRoute: Route?
 
-    private init() {}
+    init() {}
 
     func enqueue(route: Route) {
         pendingRoute = route

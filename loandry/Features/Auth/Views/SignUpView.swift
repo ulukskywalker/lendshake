@@ -8,17 +8,7 @@
 import SwiftUI
 
 struct SignUpView: View {
-    @Environment(AuthManager.self) private var authManager
-    
-    @State private var email = ""
-    @State private var password = ""
-    @State private var confirmPassword = ""
-    @State private var errorMessage: String?
-    @State private var isLoading = false
-    
-    private var isValid: Bool {
-        !email.isEmpty && !password.isEmpty && password == confirmPassword
-    }
+    @State private var viewModel = SignUpViewModel()
     
     var body: some View {
         VStack(spacing: 20) {
@@ -26,21 +16,21 @@ struct SignUpView: View {
                 .font(.largeTitle)
                 .bold()
             
-            TextField("Email", text: $email)
+            TextField("Email", text: $viewModel.email)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
                 .lsAuthInput()
-                .disabled(isLoading)
+                .disabled(viewModel.isLoading)
             
-            SecureField("Password", text: $password)
+            SecureField("Password", text: $viewModel.password)
                 .lsAuthInput()
-                .disabled(isLoading)
+                .disabled(viewModel.isLoading)
             
-            SecureField("Confirm Password", text: $confirmPassword)
+            SecureField("Confirm Password", text: $viewModel.confirmPassword)
                 .lsAuthInput()
-                .disabled(isLoading)
+                .disabled(viewModel.isLoading)
             
-            if let errorMessage = errorMessage {
+            if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage)
                     .foregroundStyle(.red)
                     .font(.caption)
@@ -49,47 +39,28 @@ struct SignUpView: View {
             
             Button {
                 Task {
-                    await signUp()
+                    await viewModel.signUp()
                 }
             } label: {
-                if isLoading {
+                if viewModel.isLoading {
                     ProgressView()
-                        .tint(.white)
-                        .lsPrimaryButton(background: .green)
+                    .tint(.white)
+                    .lsPrimaryButton(background: .green)
                 } else {
                     Text("Sign Up")
                         .lsPrimaryButton(background: .green)
                 }
             }
-            .disabled(isLoading || !isValid)
-            .animation(.easeInOut, value: isLoading)
+            .disabled(viewModel.isLoading || !viewModel.isValid)
+            .animation(.easeInOut, value: viewModel.isLoading)
             
             Spacer()
         }
         .padding()
-    }
-    
-    private func signUp() async {
-        guard isValid else {
-            errorMessage = "Please fill out all fields and ensure passwords match."
-            return
-        }
-        
-        isLoading = true
-        errorMessage = nil
-        
-        do {
-            try await authManager.signUp(email: email, password: password)
-        } catch {
-            errorMessage = error.localizedDescription
-            HapticUtility.notification(.error)
-        }
-        
-        isLoading = false
+        .sensoryFeedback(.error, trigger: viewModel.errorMessage) { _, newValue in newValue != nil }
     }
 }
 
 #Preview {
     SignUpView()
-        .environment(AuthManager())
 }

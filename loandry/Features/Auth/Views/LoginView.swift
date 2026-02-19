@@ -8,16 +8,7 @@
 import SwiftUI
 
 struct LoginView: View {
-    @Environment(AuthManager.self) private var authManager
-    
-    @State private var email = ""
-    @State private var password = ""
-    @State private var errorMessage: String?
-    @State private var isLoading = false
-    
-    private var isValid: Bool {
-        !email.isEmpty && !password.isEmpty
-    }
+    @State private var viewModel = LoginViewModel()
     
     var body: some View {
         VStack(spacing: 20) {
@@ -25,17 +16,17 @@ struct LoginView: View {
                 .font(.largeTitle)
                 .bold()
             
-            TextField("Email", text: $email)
+            TextField("Email", text: $viewModel.email)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
                 .lsAuthInput()
-                .disabled(isLoading)
+                .disabled(viewModel.isLoading)
             
-            SecureField("Password", text: $password)
+            SecureField("Password", text: $viewModel.password)
                 .lsAuthInput()
-                .disabled(isLoading)
+                .disabled(viewModel.isLoading)
             
-            if let errorMessage = errorMessage {
+            if let errorMessage = viewModel.errorMessage {
                 Text(errorMessage)
                     .foregroundStyle(.red)
                     .font(.caption)
@@ -44,42 +35,28 @@ struct LoginView: View {
             
             Button {
                 Task {
-                    await signIn()
+                    await viewModel.signIn()
                 }
             } label: {
-                if isLoading {
+                if viewModel.isLoading {
                     ProgressView()
-                        .tint(.white)
-                        .lsPrimaryButton()
+                    .tint(.white)
+                    .lsPrimaryButton()
                 } else {
                     Text("Sign In")
                         .lsPrimaryButton()
                 }
             }
-            .disabled(isLoading || !isValid)
-            .animation(.easeInOut, value: isLoading)
+            .disabled(viewModel.isLoading || !viewModel.isValid)
+            .animation(.easeInOut, value: viewModel.isLoading)
             
             Spacer()
         }
         .padding()
-    }
-    
-    private func signIn() async {
-        isLoading = true
-        errorMessage = nil
-        
-        do {
-            try await authManager.signIn(email: email, password: password)
-        } catch {
-            errorMessage = error.localizedDescription
-            HapticUtility.notification(.error)
-        }
-        
-        isLoading = false
+        .sensoryFeedback(.error, trigger: viewModel.errorMessage) { _, newValue in newValue != nil }
     }
 }
 
 #Preview {
     LoginView()
-        .environment(AuthManager())
 }

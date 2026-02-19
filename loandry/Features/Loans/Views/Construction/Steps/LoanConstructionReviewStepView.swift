@@ -8,6 +8,7 @@ struct LoanConstructionReviewStepView: View {
     let firstPaymentDate: Date
     let lateFeePolicy: String
     let lenderName: String
+    let borrowerName: String
     let borrowerEmail: String
 
     var body: some View {
@@ -140,9 +141,14 @@ struct LoanConstructionReviewStepView: View {
                                     .font(.caption2)
                                     .fontWeight(.bold)
                                     .foregroundStyle(.secondary)
+                                if !borrowerName.isEmpty {
+                                    Text(borrowerName)
+                                        .font(.body)
+                                        .fontWeight(.bold)
+                                }
                                 Text(borrowerEmail)
                                     .font(.body)
-                                    .fontWeight(.bold)
+                                    .foregroundStyle(borrowerName.isEmpty ? .primary : .secondary)
                             }
                         }
                     }

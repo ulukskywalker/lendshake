@@ -12,6 +12,8 @@ import Observation
 @MainActor
 @Observable
 class AuthManager {
+    static let shared = AuthManager()
+
     private let logger = AppLogger(.auth)
     private let service = AuthService.shared
 

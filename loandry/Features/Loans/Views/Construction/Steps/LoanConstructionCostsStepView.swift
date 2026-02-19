@@ -12,147 +12,101 @@ struct LoanConstructionCostsStepView: View {
     let onInterestSliderChange: (Double) -> Void
     let onLateFeeSliderChange: (Double) -> Void
     
+    private var usuryResult: LoanValidationResult {
+        LoanValidation.validateUsury(rate: interestSliderValue)
+    }
+    
+    private var afrResult: LoanValidationResult {
+        LoanValidation.validateAFR(rate: interestSliderValue)
+    }
+    
+    private var rateColor: Color {
+        if interestSliderValue == 0 {
+            return .green
+        } else if case .invalid = usuryResult {
+            return .red
+        } else if case .warning = afrResult {
+            return .orange
+        } else {
+            return .blue
+        }
+    }
+    
     var body: some View {
-        ScrollView {
-            VStack(spacing: 28) {
-                VStack(spacing: 8) {
-                    Text("Loan Costs")
-                        .font(.title2)
-                        .bold()
-                    Text("Define interest and fees.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top)
-                
-                // 1. Interest
-                termSection(
-                    icon: "percent",
-                    title: "Annual Interest",
-                    subtitle: "Set a fair rate for the loan."
-                ) {
-                    VStack(spacing: 12) {
-                        HStack {
-                            Text(interestSliderValue == 0 ? "Interest-Free" : "\(interestRate)%")
-                                .font(.headline)
-                                .foregroundStyle(interestSliderValue == 0 ? .green : .primary)
-                            
-                            Spacer()
-                            
-                            if interestSliderValue == 0 {
-                                Text("Family & Friends")
-                                    .font(.caption)
-                                    .bold()
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.green.opacity(0.1))
-                                    .foregroundStyle(.green)
-                                    .cornerRadius(4)
-                            }
-                        }
-                        
-                        Slider(value: $interestSliderValue, in: 0...15, step: 0.5)
-                            .tint(interestSliderValue == 0 ? .green : .blue)
-                            .onChange(of: interestSliderValue) { _, newValue in
-                                onInterestSliderChange(newValue)
-                            }
+        Form {
+            Section {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Text("Rate")
+                        Spacer()
+                        Text(interestSliderValue == 0 ? "0% (Family)" : "\(interestSliderValue, specifier: "%.1f")%")
+                            .foregroundStyle(rateColor)
+                            .bold()
                     }
-                }
-                
-                // 2. Late Fee
-                termSection(
-                    icon: "clock.badge.exclamationmark",
-                    title: "Late Fee",
-                    subtitle: "Protection against missed dates"
-                ) {
-                    VStack(spacing: 20) {
-                        Toggle("Add Late Fee", isOn: $hasLateFee.animation())
-                            .font(.headline)
-                            .onChange(of: hasLateFee) { _, enabled in
-                                if !enabled {
-                                    lateFeePolicy = "0"
-                                    lateFeeSliderValue = 0
-                                }
-                            }
-                        
-                        if hasLateFee {
-                            Divider()
-                            
-                            VStack(spacing: 12) {
-                                HStack {
-                                    Text(lateFeeSliderValue.formatted(.currency(code: "USD")))
-                                        .font(.headline)
-                                        .bold()
-                                        .foregroundStyle(.red)
-                                    
-                                    Spacer()
-                                    
-                                    Text("Fee per installment")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                
-                                Slider(value: $lateFeeSliderValue, in: 0...50, step: 5)
-                                    .tint(.red)
-                                    .onChange(of: lateFeeSliderValue) { _, newValue in
-                                        onLateFeeSliderChange(newValue)
-                                    }
-                                
-                                HStack(spacing: 6) {
-                                    Image(systemName: "info.circle")
-                                    Text("Applies after a 5-day grace period.")
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            }
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                    
+                    Slider(value: $interestSliderValue, in: 0...15, step: 0.5)
+                        .tint(rateColor)
+                        .onChange(of: interestSliderValue) { _, newValue in
+                            onInterestSliderChange(newValue)
                         }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Interest")
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    if interestSliderValue == 0 {
+                        Text("0% interest avoids tax complications for loans under $10k between friends/family.")
+                    } else if case .invalid(let msg) = usuryResult {
+                        Label(msg, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    } else if case .warning(let msg) = afrResult {
+                        Label(msg, systemImage: "info.circle.fill")
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("Maximum rate is capped to comply with most state usury laws.")
                     }
                 }
             }
-            .padding(.bottom, 16)
+            
+            Section {
+                Toggle("Add Late Fee", isOn: $hasLateFee.animation())
+                    .onChange(of: hasLateFee) { _, enabled in
+                        if !enabled {
+                            lateFeePolicy = "0"
+                            lateFeeSliderValue = 0
+                        }
+                    }
+                
+                if hasLateFee {
+                    VStack(alignment: .leading) {
+                        HStack {
+                            Text("Fee Amount")
+                            Spacer()
+                            Text(lateFeeSliderValue.formatted(.currency(code: "USD")))
+                                .bold()
+                        }
+                        
+                        Slider(value: $lateFeeSliderValue, in: 0...50, step: 5)
+                            .tint(.red)
+                            .onChange(of: lateFeeSliderValue) { _, newValue in
+                                onLateFeeSliderChange(newValue)
+                            }
+                    }
+                    .padding(.vertical, 4)
+                }
+            } header: {
+                Text("Late Fees")
+            } footer: {
+                if hasLateFee {
+                    Text("Applies after a 5-day grace period.")
+                }
+            }
         }
-        .background(Color.appBackground)
         .onAppear {
             if let fee = Double(lateFeePolicy), fee > 0 {
                 hasLateFee = true
             }
         }
-    }
-    
-    @ViewBuilder
-    private func termSection<Content: View>(
-        icon: String,
-        title: String,
-        subtitle: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.blue)
-                    .frame(width: 24, height: 24)
-                    .background(Color.blue.opacity(0.1))
-                    .clipShape(Circle())
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.headline)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 4)
-            
-            content()
-                .padding()
-                .background(Color.cardBackground)
-                .cornerRadius(16)
-                .lsCardContainer()
-        }
-        .padding(.horizontal)
     }
 }

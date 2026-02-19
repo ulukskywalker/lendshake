@@ -151,28 +151,38 @@ struct LoanDetailView: View {
 
     @ViewBuilder
     private var draftActions: some View {
-        if isLender && liveLoan.lender_signed_at == nil {
-            Button { showAgreementSheet = true } label: { Text("Review & Sign Agreement").lsPrimaryButton() }
+        if isLender {
+            Button {
+                Task {
+                    do { try await loanManager.sendForSignature(loan: liveLoan) }
+                    catch { errorMsg = loanManager.friendlyTransitionErrorMessage(error); showError = true }
+                }
+            } label: {
+                Label("Send via PandaDoc", systemImage: "paperplane.fill")
+                    .lsPrimaryButton()
+            }
         } else {
-            Text("Waiting for signatures...").foregroundStyle(.secondary)
+            Text("Waiting for lender to send agreement...").foregroundStyle(.secondary)
         }
     }
 
     @ViewBuilder
     private var sentActions: some View {
-        if !isLender && liveLoan.borrower_signed_at == nil {
-            VStack(spacing: 10) {
-                Button { showBorrowerSignSheet = true } label: { Text("Complete Info & Sign").lsPrimaryButton() }
-                Button { showRejectAlert = true } label: { Text("Reject Agreement").lsDestructiveButton() }
-            }
-        } else if isLender {
-            VStack(spacing: 10) {
-                Text("Waiting for borrower to sign...").foregroundStyle(.secondary)
-                Button { showCancelAlert = true } label: { Text("Cancel Request").lsDestructiveButton() }
-            }
-        } else {
-            Text("Waiting for borrower to sign...").foregroundStyle(.secondary)
+        VStack(spacing: 8) {
+            Text(isLender ? "Waiting for Borrower to Sign" : "Please check your email")
+                .font(.headline)
+            Text(isLender ? "They received an email from PandaDoc." : "Sign the agreement via the link sent by PandaDoc.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(Color.blue.opacity(0.05))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
@@ -183,7 +193,7 @@ struct LoanDetailView: View {
                 .lsPrimaryButton(background: .green)
             }
         } else {
-            statusPlaceholder(systemName: "hourglass", text: "Waiting for Lender to Release Funds")
+             statusPlaceholder(systemName: "hourglass", text: "Waiting for Lender to Release Funds")
         }
     }
 
@@ -227,16 +237,16 @@ struct LoanDetailView: View {
             Menu {
                 Button { showAgreementSheet = true } label: { Label("View Contract", systemImage: "doc.text") }
                 Button { showTermsSheet = true } label: { Label("View Terms", systemImage: "list.clipboard") }
-                if isLender && [.draft, .sent, .active].contains(liveLoan.status) {
+                if isLender && [.draft, .sent, .active, .cancelled].contains(liveLoan.status) {
                     Button(role: .destructive) {
                         switch liveLoan.status {
-                        case .draft: showDeleteDraftAlert = true
+                        case .draft, .cancelled: showDeleteDraftAlert = true
                         case .sent: showCancelAlert = true
                         case .active: showForgiveAlert = true
                         default: break
                         }
                     } label: {
-                        Label(liveLoan.status == .draft ? "Delete Draft" : liveLoan.status == .sent ? "Cancel Request" : "Forgive Loan", systemImage: "trash")
+                        Label(liveLoan.status == .draft || liveLoan.status == .cancelled ? "Delete" : liveLoan.status == .sent ? "Cancel Request" : "Forgive Loan", systemImage: "trash")
                     }
                 }
             } label: { Image(systemName: "ellipsis.circle") }

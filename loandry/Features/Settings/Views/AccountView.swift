@@ -193,6 +193,8 @@ struct AccountView: View {
         }
         .lsToast(message: $successToast, style: .success)
         .lsToast(message: $errorToast, style: .error)
+        .sensoryFeedback(.success, trigger: successToast) { _, newValue in newValue != nil }
+        .sensoryFeedback(.error, trigger: errorToast) { _, newValue in newValue != nil }
     }
 
     private func loadProfile() {
@@ -240,14 +242,12 @@ struct AccountView: View {
         
         if hasFieldError {
             errorToast = "Please fix highlighted fields."
-            HapticUtility.notification(.warning)
             return
         }
 
         if let phoneValidation = ProfileValidation.validatePhone(normalizedPhone, required: false) {
             phoneError = phoneValidation
             errorToast = "Please fix highlighted fields."
-            HapticUtility.notification(.warning)
             return
         }
 
@@ -267,10 +267,8 @@ struct AccountView: View {
             )
             isEditing = false
             successToast = "Profile updated."
-            HapticUtility.notification(.success)
         } catch {
             errorToast = "Failed to save profile: \(error.localizedDescription)"
-            HapticUtility.notification(.error)
         }
     }
 }

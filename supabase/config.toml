@@ -1,0 +1,5 @@
+
+project_id = "loandry"
+
+[functions.pandadoc-sign]
+verify_jwt = true

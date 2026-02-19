@@ -8,101 +8,78 @@
 import SwiftUI
 
 struct DashboardView: View {
-    @Environment(LoanManager.self) var loanManager
+    @State private var viewModel = DashboardViewModel()
     @Environment(AppRouter.self) var appRouter
-    @State private var showCreateSheet: Bool = false
-    @State private var path = NavigationPath()
-    @State private var deepLinkToken = UUID()
-
-    private struct DeepLinkedLoan: Hashable {
-        let loanID: UUID
-        let paymentID: UUID?
-        let token: UUID
-    }
     
     var body: some View {
-        NavigationStack(path: $path) {
-            ZStack {
-                Color.appBackground.ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    LoanListView()
-                }
+        NavigationStack(path: $viewModel.navigationPath) {
+            LoanListView()
+                .navigationTitle("Loandry")
                 .toolbar {
-                    
-                    
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            showCreateSheet = true
+                            viewModel.showCreateSheet = true
                         } label: {
                             Image(systemName: "plus")
-                                .font(.headline)
-                                .foregroundStyle(Color.blue)
                         }
                     }
                 }
-                .navigationTitle("Loandry")
-                .toolbarBackground(.visible, for: .navigationBar)
                 .task {
-                    if loanManager.loans.isEmpty {
-                        do {
-                            try await loanManager.fetchLoans()
-                        } catch {
-                            print("Dashboard Task Error: \(error)")
-                        }
-                    }
+                    await viewModel.onAppear()
                 }
                 .refreshable {
-                    do {
-                        try await loanManager.fetchLoans()
-                    } catch {
-                        print("Dashboard Refresh Error: \(error)")
+                    await viewModel.onRefresh()
+                }
+                .navigationDestination(for: Loan.self) { loan in
+                    LoanDetailView(loan: loan)
+                }
+                .navigationDestination(for: DashboardViewModel.DeepLinkedLoan.self) { target in
+                    if let loan = LoanManager.shared.loans.first(where: { $0.id == target.loanID }) {
+                        LoanDetailView(loan: loan, initialSelectedPaymentID: target.paymentID)
+                    } else {
+                        ContentUnavailableView("Loan Not Found", systemImage: "exclamationmark.triangle")
                     }
                 }
-            }
-            .navigationDestination(for: Loan.self) { loan in
-                LoanDetailView(loan: loan)
-            }
-            .navigationDestination(for: DeepLinkedLoan.self) { target in
-                if let loan = loanManager.loans.first(where: { $0.id == target.loanID }) {
-                    LoanDetailView(loan: loan, initialSelectedPaymentID: target.paymentID)
-                } else {
-                    ContentUnavailableView("Loan Not Found", systemImage: "exclamationmark.triangle")
+                .onChange(of: LoanManager.shared.loans.count) { _, _ in
+                    viewModel.handleDeepLink(route: appRouter.pendingRoute)
+                    if appRouter.pendingRoute != nil {
+                         _ = appRouter.consumeRoute()
+                    }
                 }
-            }
-            .onChange(of: loanManager.loans.count) { _, _ in
-                consumePendingDeepLinkIfPossible()
-            }
-            .onChange(of: appRouter.pendingRoute != nil) { _, _ in
-                consumePendingDeepLinkIfPossible()
-            }
-            .fullScreenCover(isPresented: $showCreateSheet) {
-                NavigationStack {
-                    LoanConstructionView(onLoanCreated: { newLoan in
-                        showCreateSheet = false
-                        // Small delay to allow sheet to dismiss before pushing
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            path.append(newLoan)
-                        }
-                    })
+                .onChange(of: appRouter.pendingRoute != nil) { _, _ in
+                    viewModel.handleDeepLink(route: appRouter.pendingRoute)
+                     if appRouter.pendingRoute != nil {
+                         _ = appRouter.consumeRoute()
+                    }
                 }
-            }
+                .fullScreenCover(isPresented: $viewModel.showCreateSheet) {
+                    NavigationStack {
+                        LoanConstructionView(onLoanCreated: { newLoan in
+                            viewModel.onLoanCreated(newLoan: newLoan)
+                        })
+                    }
+                }
         }
-    }
-
-    private func consumePendingDeepLinkIfPossible() {
-        guard let route = appRouter.pendingRoute else { return }
-        switch route {
-        case .loan(let loanID, let paymentID):
-            guard loanManager.loans.contains(where: { $0.id == loanID }) else { return }
-            deepLinkToken = UUID()
-            path.append(DeepLinkedLoan(loanID: loanID, paymentID: paymentID, token: deepLinkToken))
-            _ = appRouter.consumeRoute()
+        .overlay(alignment: .top) {
+            if let error = viewModel.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .padding()
+                    .background(Color.red.cornerRadius(8))
+                    .padding(.top)
+                    .transition(.move(edge: .top))
+                    .onTapGesture {
+                        viewModel.errorMessage = nil
+                    }
+            }
         }
     }
 }
     
 #Preview {
     DashboardView()
-        .environment(LoanManager())
+        .environment(LoanManager.shared)
+        .environment(AuthManager.shared)
+        .environment(AppRouter())
 }
