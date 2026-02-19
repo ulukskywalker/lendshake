@@ -117,28 +117,27 @@ class AuthManager {
         isAuthenticated = false; isProfileComplete = false; currentUserProfile = nil
     }
     
-    func signIn(email: String, password: String) async throws {
-        try await service.signIn(email: email, password: password)
-        awaitingEmailConfirmation = false; isAuthenticated = true
-        await checkSession()
-    }
-    
-    func signUp(email: String, password: String) async throws {
-        let redirectURL = URL(string: "loandry://auth/callback")
-        try await service.signUp(email: email, password: password, redirectToURL: redirectURL)
+    var pendingEmail: String?
+
+    func sendMagicLink(email: String) async throws {
+        self.pendingEmail = email
+        try await service.sendMagicLink(email: email)
         awaitingEmailConfirmation = true
     }
     
-    func signInWithProvider(_ provider: Auth.Provider) async throws {
-        let url = try service.signInWithProvider(provider)
-        await UIApplication.shared.open(url)
+    func resendMagicLink() async throws {
+        guard let email = pendingEmail else { return }
+        try await service.sendMagicLink(email: email)
     }
+    
+
 
     func handleAuthCallback(url: URL) async -> Bool {
         guard url.host?.lowercased() == "auth", url.path.lowercased().contains("callback") else { return false }
         do {
             _ = try await service.session(from: url)
-            awaitingEmailConfirmation = false; isAuthenticated = true
+            isAuthenticated = true
+            awaitingEmailConfirmation = false
             try await checkProfile()
             return true
         } catch {
@@ -147,10 +146,7 @@ class AuthManager {
         }
     }
     
-    func resendVerification() async throws {
-        guard let email = currentUserEmail else { return }
-        try await service.resendVerificationEmail(email: email)
-    }
+
 
     func completeVerificationIfPossible() async -> Bool {
         await checkSession()
@@ -163,4 +159,6 @@ class AuthManager {
         // If successful, sign out locally
         try await signOut()
     }
+    
+
 }

@@ -1,3 +1,4 @@
+
 //
 //  LoginView.swift
 //  loandry
@@ -11,49 +12,53 @@ struct LoginView: View {
     @State private var viewModel = LoginViewModel()
     
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Sign In")
-                .font(.largeTitle)
-                .bold()
+        VStack(spacing: 24) {
+            Spacer()
             
-            TextField("Email", text: $viewModel.email)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.emailAddress)
-                .lsAuthInput()
-                .disabled(viewModel.isLoading)
-            
-            SecureField("Password", text: $viewModel.password)
-                .lsAuthInput()
-                .disabled(viewModel.isLoading)
-            
-            if let errorMessage = viewModel.errorMessage {
-                Text(errorMessage)
-                    .foregroundStyle(.red)
-                    .font(.caption)
-                    .transition(.opacity)
+            VStack(spacing: 8) {
+                Text("Welcome")
+                    .font(.largeTitle)
+                    .bold()
+                Text("Enter your email to sign in or create an account.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
             
-            Button {
-                Task {
-                    await viewModel.signIn()
+            VStack(spacing: 16) {
+                TextField("Email", text: $viewModel.email)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.emailAddress)
+                    .lsAuthInput()
+                    .disabled(viewModel.isLoading)
+                
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
                 }
-            } label: {
-                if viewModel.isLoading {
-                    ProgressView()
-                    .tint(.white)
-                    .lsPrimaryButton()
-                } else {
-                    Text("Sign In")
-                        .lsPrimaryButton()
+                
+                Button {
+                    Task {
+                        await viewModel.sendMagicLink()
+                    }
+                } label: {
+                    if viewModel.isLoading {
+                        ProgressView()
+                            .tint(.white)
+                            .lsPrimaryButton()
+                    } else {
+                        Text("Send Magic Link")
+                            .lsPrimaryButton()
+                    }
                 }
+                .disabled(viewModel.isLoading || !viewModel.isValid)
             }
-            .disabled(viewModel.isLoading || !viewModel.isValid)
-            .animation(.easeInOut, value: viewModel.isLoading)
             
+            Spacer()
             Spacer()
         }
         .padding()
-        .sensoryFeedback(.error, trigger: viewModel.errorMessage) { _, newValue in newValue != nil }
     }
 }
 

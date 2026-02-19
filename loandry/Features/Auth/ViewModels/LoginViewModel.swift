@@ -1,3 +1,4 @@
+
 //
 //  LoginViewModel.swift
 //  loandry
@@ -12,12 +13,11 @@ import Observation
 @Observable
 class LoginViewModel {
     var email = ""
-    var password = ""
     var errorMessage: String?
     var isLoading = false
     
     var isValid: Bool {
-        !email.isEmpty && !password.isEmpty
+        !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     
     private let authManager: AuthManager
@@ -26,17 +26,16 @@ class LoginViewModel {
         self.authManager = authManager
     }
     
-    // Convenience init for previews/default usage, must be MainActor
     convenience init() {
         self.init(authManager: AuthManager.shared)
     }
     
-    func signIn() async {
+    func sendMagicLink() async {
         isLoading = true
         errorMessage = nil
         
         do {
-            try await authManager.signIn(email: email, password: password)
+            try await authManager.sendMagicLink(email: email)
         } catch {
             errorMessage = error.localizedDescription
         }

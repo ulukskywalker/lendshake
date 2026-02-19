@@ -17,6 +17,7 @@ struct RootView: View {
         Group {
             if authManager.isLoading {
                 SplashLoadingView()
+
             } else if authManager.isAuthenticated {
                 ContentView()
             } else if authManager.awaitingEmailConfirmation {

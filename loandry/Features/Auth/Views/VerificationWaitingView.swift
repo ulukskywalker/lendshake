@@ -14,9 +14,8 @@ struct VerificationWaitingView: View {
         VStack(spacing: 20) {
             Spacer()
             
-            Image(systemName: "envelope.badge.fill")
+            Text("📩")
                 .font(.system(size: 80))
-                .foregroundStyle(.blue)
             
             Text("Check your email")
                 .font(.largeTitle)
@@ -38,14 +37,12 @@ struct VerificationWaitingView: View {
             Spacer()
             
             Button {
-                Task {
-                    await viewModel.checkVerification()
-                }
+                Task { await viewModel.resendVerification() }
             } label: {
-                if viewModel.isChecking {
-                    ProgressView()
+                if viewModel.isResending {
+                    ProgressView().controlSize(.small)
                 } else {
-                    Text("I've Verified")
+                    Text("Resend Link")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -54,21 +51,7 @@ struct VerificationWaitingView: View {
                         .cornerRadius(10)
                 }
             }
-            .disabled(viewModel.isChecking)
-            
-            Button {
-                Task { await viewModel.resendVerification() }
-            } label: {
-                if viewModel.isResending {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text("Resend Email")
-                        .font(.subheadline)
-                        .foregroundStyle(.blue)
-                }
-            }
-            .disabled(viewModel.isResending || viewModel.isChecking)
-            .padding(.top, 10)
+            .disabled(viewModel.isResending)
             
             Button("Cancel / Back to Sign In") {
                 viewModel.cancel()
@@ -79,7 +62,7 @@ struct VerificationWaitingView: View {
         }
         .padding()
         .sensoryFeedback(.warning, trigger: viewModel.statusMessage) { _, newValue in newValue != nil }
-        .sensoryFeedback(.success, trigger: viewModel.triggerSuccessHaptic)
+
     }
 }
 

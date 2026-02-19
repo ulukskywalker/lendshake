@@ -1,3 +1,4 @@
+
 //
 //  VerificationWaitingViewModel.swift
 //  loandry
@@ -11,7 +12,6 @@ import Observation
 @MainActor
 @Observable
 class VerificationWaitingViewModel {
-    var isChecking = false
     var isResending = false
     var statusMessage: String?
     
@@ -25,27 +25,10 @@ class VerificationWaitingViewModel {
         self.init(authManager: AuthManager.shared)
     }
     
-    var triggerSuccessHaptic = false
-    
-    func checkVerification() async {
-        isChecking = true
-        statusMessage = nil
-        
-        let completed = await authManager.completeVerificationIfPossible()
-        
-        if !completed {
-            statusMessage = "Open the verification link from the same device to finish sign in."
-        } else {
-            triggerSuccessHaptic.toggle() // The observable property
-        }
-        
-        isChecking = false
-    }
-
     func resendVerification() async {
         guard !isResending else { return }
         
-        if authManager.currentUserEmail == nil {
+        if authManager.pendingEmail == nil {
             statusMessage = "Session expired. Please sign in again."
             return
         }
@@ -54,7 +37,7 @@ class VerificationWaitingViewModel {
         statusMessage = "Sending..."
         
         do {
-            try await authManager.resendVerification()
+            try await authManager.resendMagicLink()
             statusMessage = "Sent! Check your inbox."
         } catch {
             statusMessage = "Error: \(error.localizedDescription)"
