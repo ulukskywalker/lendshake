@@ -9,23 +9,21 @@ import SwiftUI
 
 struct DashboardView: View {
     @State private var viewModel = DashboardViewModel()
+    @State private var showSettingsSheet = false
     @Environment(AppRouter.self) var appRouter
     @Environment(NotificationManager.self) var notificationManager
     @AppStorage("notifications.prompted") private var didPromptForNotifications = false
     
     var body: some View {
-        NavigationStack(path: $viewModel.navigationPath) {
-            LoanListView()
-                .navigationTitle("Loans")
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            viewModel.showCreateSheet = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                    }
-                }
+        ZStack {
+            NavigationStack {
+                LoanListView(
+                    selectedLoan: Binding(
+                        get: { viewModel.selectedLoan },
+                        set: { viewModel.selectedLoan = $0 }
+                    )
+                )
+                .navigationBarHidden(true)
                 .task {
                     if !didPromptForNotifications {
                         _ = await notificationManager.requestAuthorizationIfNeeded()
@@ -36,26 +34,18 @@ struct DashboardView: View {
                 .refreshable {
                     await viewModel.onRefresh()
                 }
-                .navigationDestination(for: Loan.self) { loan in
-                    LoanDetailView(loan: loan)
-                }
-                .navigationDestination(for: DashboardViewModel.DeepLinkedLoan.self) { target in
-                    if let loan = LoanManager.shared.loans.first(where: { $0.id == target.loanID }) {
-                        LoanDetailView(loan: loan, initialSelectedPaymentID: target.paymentID)
-                    } else {
-                        ContentUnavailableView("Loan Not Found", systemImage: "exclamationmark.triangle")
-                    }
-                }
+
                 .onChange(of: LoanManager.shared.loans.count) { _, _ in
                     viewModel.handleDeepLink(route: appRouter.pendingRoute)
                     if appRouter.pendingRoute != nil {
-                         _ = appRouter.consumeRoute()
+                        _ = appRouter.consumeRoute()
                     }
+                    viewModel.checkSelectedLoanExists()
                 }
                 .onChange(of: appRouter.pendingRoute != nil) { _, _ in
                     viewModel.handleDeepLink(route: appRouter.pendingRoute)
-                     if appRouter.pendingRoute != nil {
-                         _ = appRouter.consumeRoute()
+                    if appRouter.pendingRoute != nil {
+                        _ = appRouter.consumeRoute()
                     }
                 }
                 .sheet(isPresented: $viewModel.showCreateSheet) {
@@ -65,6 +55,53 @@ struct DashboardView: View {
                         })
                     }
                 }
+                .sheet(isPresented: $showSettingsSheet) {
+                    NavigationStack {
+                        SettingsView()
+                    }
+                }
+            }
+            
+            // ── Floating top buttons (covered by expanded card) ──
+            VStack {
+                HStack {
+                    Button {
+                        showSettingsSheet = true
+                    } label: {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(.white.opacity(0.2), lineWidth: 0.5)
+                            )
+                            .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
+                    }
+                    
+                    Spacer()
+                    
+                    Button {
+                        viewModel.showCreateSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(.white.opacity(0.2), lineWidth: 0.5)
+                            )
+                            .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
+                    }
+                }
+                .padding(.horizontal, 12)
+                
+                Spacer()
+            }
+            .zIndex(viewModel.selectedLoan == nil ? 1 : -1)
         }
         .overlay(alignment: .top) {
             if let error = viewModel.errorMessage {
@@ -88,4 +125,5 @@ struct DashboardView: View {
         .environment(LoanManager.shared)
         .environment(AuthManager.shared)
         .environment(AppRouter())
+        .environment(NotificationManager.shared)
 }

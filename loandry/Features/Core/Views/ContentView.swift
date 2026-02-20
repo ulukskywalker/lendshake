@@ -13,19 +13,7 @@ struct ContentView: View {
     @Environment(NotificationManager.self) private var notificationManager
 
     var body: some View {
-        TabView {
-            DashboardView()
-                .tabItem {
-                    Label("Home", systemImage: "house.fill")
-                }
-                .badge(loanManager.requiredActionCount)
-            
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape.fill")
-                }
-        }
-        .tint(.blue)
+        DashboardView()
     }
 }
 

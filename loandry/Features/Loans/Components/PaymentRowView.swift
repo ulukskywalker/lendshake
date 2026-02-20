@@ -118,14 +118,16 @@ struct PaymentRowView: View {
                     Text(payment.amount.formatted(.currency(code: "USD")))
                         .bold()
                     
-                    Text(payment.status.title)
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(statusColor.opacity(0.1))
-                        .foregroundStyle(statusColor)
-                        .cornerRadius(8)
+                    if payment.status != .pending {
+                        Text(payment.status.title)
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(statusColor.opacity(0.1))
+                            .foregroundStyle(statusColor)
+                            .cornerRadius(8)
+                    }
                 }
             }
             

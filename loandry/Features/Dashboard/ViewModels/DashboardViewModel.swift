@@ -12,27 +12,9 @@ import Observation
 @Observable
 class DashboardViewModel {
     var showCreateSheet: Bool = false
-    var navigationPath = NavigationPath()
+    var selectedLoan: Loan? = nil
     
-    // Dependencies
-    // Note: We access LoanManager via the singleton in the VM for actions,
-    // but the View might still observe it directly or via VM.
-    // For MVVM purity, the VM should expose what the View needs.
-    // However, since LoanManager is already an @Observable singleton, existing views rely on it.
-    // We will keep using LoanManager.shared for actions.
-    
-    // Deep linking state
-    struct DeepLinkedLoan: Hashable {
-        let loanID: UUID
-        let paymentID: UUID?
-        // Token to force uniqueness if needed, though loanID+paymentID is usually unique enough for a route.
-        // Keeping it to match previous logic if necessary, or simplification.
-        let token = UUID()
-    }
-    
-    init() {
-        // Initialization if needed
-    }
+    init() {}
     
     var errorMessage: String?
     
@@ -60,23 +42,36 @@ class DashboardViewModel {
         guard let route = route else { return }
         
         switch route {
-        case .loan(let loanID, let paymentID):
-            // Only navigate if we have the loan loaded
-            if LoanManager.shared.loans.contains(where: { $0.id == loanID }) {
-                let deepLink = DeepLinkedLoan(loanID: loanID, paymentID: paymentID)
-                navigationPath.append(deepLink)
+        case .loan(let loanID, _):
+            if let loan = LoanManager.shared.loans.first(where: { $0.id == loanID }) {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+                    selectedLoan = loan
+                }
             }
         }
     }
     
     func onLoanCreated(newLoan: Loan) {
         showCreateSheet = false
-        // Small delay to allow sheet to dismiss interaction to finish before pushing
-        // This is a UI-specific delay, but acceptable to orchestrate here or in View.
-        // Using Task to handle the async delay on MainActor
         Task {
             try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
-            navigationPath.append(newLoan)
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+                selectedLoan = newLoan
+            }
+        }
+    }
+    
+    func collapseLoan() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            selectedLoan = nil
+        }
+    }
+    
+    /// Auto-close expansion if the selected loan no longer exists (e.g. deleted)
+    func checkSelectedLoanExists() {
+        guard let selected = selectedLoan else { return }
+        if !LoanManager.shared.loans.contains(where: { $0.id == selected.id }) {
+            collapseLoan()
         }
     }
 }
