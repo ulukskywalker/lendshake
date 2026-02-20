@@ -200,8 +200,32 @@ struct LoanDetailView: View {
         switch liveLoan.status {
         case .draft, .sent, .approved, .funding_sent: return true
         case .active: return !isLender
-        case .completed, .forgiven: return true
-        case .cancelled: return false
+        case .completed, .forgiven, .cancelled: return false
+        }
+    }
+
+    private var pendingActionDisplay: (title: String, isYourTurn: Bool) {
+        switch liveLoan.status {
+        case .draft:
+            return isLender ? ("Send Agreement", true) : ("Waiting for Lender", false)
+        case .sent:
+            return isLender ? ("Waiting for Borrower", false) : ("Sign Agreement", true)
+        case .approved:
+            return isLender ? ("Send Funds", true) : ("Waiting for Lender", false)
+        case .funding_sent:
+            return isLender ? ("Waiting for Borrower", false) : ("Confirm Receipt", true)
+        case .active:
+            return isLender ? ("Waiting for Payment", false) : ("Record a Payment", true)
+        default:
+            return ("Inactive", false)
+        }
+    }
+
+    private var counterpartyDisplay: String {
+        if isLender {
+            return liveLoan.borrower_name_snapshot ?? liveLoan.borrower_name ?? "Borrower"
+        } else {
+            return lenderName == "Loading..." ? "Lender" : lenderName
         }
     }
     
@@ -236,17 +260,29 @@ struct LoanDetailView: View {
                     Button {
                         showPendingActionSheet = true
                     } label: {
+                        let action = pendingActionDisplay
                         HStack(spacing: 12) {
-                            Image(systemName: liveLoan.status == .active ? "dollarsign.circle.fill" : "exclamationmark.circle.fill")
+                            Image(systemName: action.isYourTurn ? "exclamationmark.circle.fill" : "hourglass")
                                 .font(.system(size: 18))
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(action.isYourTurn ? .orange : .secondary)
                                 .frame(width: 24)
                             
-                            Text(liveLoan.status == .active && !isLender ? "Make a Payment" : "Pending Action")
+                            Text(action.title)
                                 .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(action.isYourTurn ? .primary : .secondary)
                             
                             Spacer()
+                            
+                            if !action.isYourTurn {
+                                Text("Wait")
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.secondary.opacity(0.5))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(Color.secondary.opacity(0.1))
+                                    .clipShape(Capsule())
+                            }
                             
                             Image(systemName: "chevron.right")
                                 .font(.caption)

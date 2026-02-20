@@ -280,7 +280,7 @@ private struct LoanCardContainer: View {
         .offset(y: pullDragOffset)
         .animation(.spring(response: 0.45, dampingFraction: 0.85), value: pullDragOffset)
         .fullScreenCover(isPresented: $showInfoSheet) {
-            loanInfoView
+            loanDetailsView
         }
         .task(id: loan.lender_id) {
             if !isLender {
@@ -361,9 +361,9 @@ private struct LoanCardContainer: View {
         )
     }
     
-    // MARK: - Loan Info View (slides from right)
+    // MARK: - Loan Details View (slides from right)
     
-    private var loanInfoView: some View {
+    private var loanDetailsView: some View {
         VStack(spacing: 0) {
             // Header with back button
             HStack(spacing: 10) {
@@ -376,12 +376,12 @@ private struct LoanCardContainer: View {
                         Text("Back")
                             .font(.system(size: 16))
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.primary)
                 }
                 
                 Spacer()
                 
-                Text("Loan Info")
+                Text("Loan Details")
                     .font(.system(size: 16, weight: .semibold))
                 
                 Spacer()
@@ -396,7 +396,7 @@ private struct LoanCardContainer: View {
                 .opacity(0)
             }
             .padding(.horizontal, 20)
-            .frame(height: CarouselMetrics.peekHeight)
+            .frame(height: 56)
             
             Rectangle()
                 .fill(Color(uiColor: .separator).opacity(0.3))
