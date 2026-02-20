@@ -45,7 +45,37 @@ class AuthManager {
     }
     
     init() {
-        Task { await checkSession() }
+        listenToAuthState()
+        Task {
+            await checkSession()
+        }
+    }
+    
+    // MARK: - Auth Listener
+    
+    private func listenToAuthState() {
+        Task { @MainActor in
+            _ = await supabase.auth.onAuthStateChange { [weak self] event, session in
+                guard let self = self else { return }
+                Task { @MainActor in
+                    self.logger.info("Auth State Change: \(event)")
+                    self.isAuthenticated = session != nil
+                    
+                    if session != nil {
+                        self.awaitingEmailConfirmation = false
+                        self.isLoading = false
+                        try? await self.checkProfile()
+                    }
+                    
+                    if event == .signedOut {
+                        self.isAuthenticated = false
+                        self.awaitingEmailConfirmation = false
+                        self.currentUserProfile = nil
+                        self.isProfileComplete = false
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - State Orchestration
@@ -133,15 +163,28 @@ class AuthManager {
 
 
     func handleAuthCallback(url: URL) async -> Bool {
-        guard url.host?.lowercased() == "auth", url.path.lowercased().contains("callback") else { return false }
+        // Robust check for various callback formats: loandry://auth/callback or loandry://auth-callback
+        let isAuthHost = url.host?.lowercased() == "auth"
+        let isAuthCallbackHost = url.host?.lowercased() == "auth-callback"
+        let isCallbackPath = url.path.lowercased().contains("callback")
+        
+        guard isAuthCallbackHost || (isAuthHost && isCallbackPath) else {
+            logger.debug("URL received but not an auth callback: \(url.absoluteString)")
+            return false
+        }
+        
         do {
+            logger.info("Processing auth callback URL...")
             _ = try await service.session(from: url)
+            
+            // Note: listenToAuthState() will pick up the session change, 
+            // but we update manually here for immediate UI feedback.
             isAuthenticated = true
             awaitingEmailConfirmation = false
             try await checkProfile()
             return true
         } catch {
-            logger.warning("Auth callback failed: \(error.localizedDescription)")
+            logger.error("Auth callback session extraction failed: \(error.localizedDescription)")
             return false
         }
     }

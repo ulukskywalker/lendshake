@@ -51,9 +51,12 @@ private struct SplashLoadingView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 20) {
-                Image(systemName: "banknote.fill")
-                    .font(.system(size: 54, weight: .semibold))
-                    .foregroundStyle(Color.blue)
+                Image("AppLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 100, height: 100)
+                    .cornerRadius(22)
+                    .shadow(radius: 10)
 
                 Text("Loandry")
                     .font(.system(size: 34, weight: .bold, design: .rounded))

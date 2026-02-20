@@ -18,8 +18,12 @@ struct WelcomeView: View {
             VStack(spacing: 30) {
                 Spacer()
                 
-                Text("🤝")
-                    .font(.system(size: 80))
+                Image("AppLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 120, height: 120)
+                    .cornerRadius(28)
+                    .shadow(radius: 12)
                 
                 Text("Loandry")
                     .font(.largeTitle)

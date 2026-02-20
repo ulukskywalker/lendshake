@@ -11,6 +11,8 @@ import SwiftUI
 struct LoginView: View {
     @State private var viewModel = LoginViewModel()
     
+    @FocusState private var isEmailFocused: Bool
+    
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
@@ -28,8 +30,14 @@ struct LoginView: View {
                 TextField("Email", text: $viewModel.email)
                     .textInputAutocapitalization(.never)
                     .keyboardType(.emailAddress)
+                    .focused($isEmailFocused)
                     .lsAuthInput()
                     .disabled(viewModel.isLoading)
+                    .task {
+                        // Minimal delay to allow view transition to start before keyboard appears
+                        try? await Task.sleep(nanoseconds: 150_000_000)
+                        isEmailFocused = true
+                    }
                 
                 if let errorMessage = viewModel.errorMessage {
                     Text(errorMessage)
@@ -37,26 +45,26 @@ struct LoginView: View {
                         .font(.caption)
                         .multilineTextAlignment(.center)
                 }
-                
-                Button {
-                    Task {
-                        await viewModel.sendMagicLink()
-                    }
-                } label: {
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .tint(.white)
-                            .lsPrimaryButton()
-                    } else {
-                        Text("Send Magic Link")
-                            .lsPrimaryButton()
-                    }
-                }
-                .disabled(viewModel.isLoading || !viewModel.isValid)
             }
             
             Spacer()
-            Spacer()
+            
+            Button {
+                Task {
+                    await viewModel.sendMagicLink()
+                }
+            } label: {
+                if viewModel.isLoading {
+                    ProgressView()
+                        .tint(.white)
+                        .lsPrimaryButton()
+                } else {
+                    Text("Send Magic Link")
+                        .lsPrimaryButton()
+                }
+            }
+            .disabled(viewModel.isLoading || !viewModel.isValid)
+            .padding(.bottom, 20)
         }
         .padding()
     }

@@ -50,4 +50,12 @@ class VerificationWaitingViewModel {
         authManager.awaitingEmailConfirmation = false
         authManager.isAuthenticated = false
     }
+
+    func checkStatus() async {
+        statusMessage = "Checking..."
+        let success = await authManager.completeVerificationIfPossible()
+        if !success {
+            statusMessage = "Verification link not clicked yet."
+        }
+    }
 }

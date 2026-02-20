@@ -53,6 +53,11 @@ struct VerificationWaitingView: View {
             }
             .disabled(viewModel.isResending)
             
+            Button("Check Status") {
+                Task { await viewModel.checkStatus() }
+            }
+            .padding(.top, 10)
+            
             Button("Cancel / Back to Sign In") {
                 viewModel.cancel()
             }
